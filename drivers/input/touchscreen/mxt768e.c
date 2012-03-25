@@ -65,7 +65,7 @@
 #define MXT768E_FW_NAME			"mXT768e.fw"
 
 #define MXT_FWRESET_TIME		175	/* msec */
-#define MXT_RESET_TIME		300	/* msec */
+#define MXT_RESET_TIME		325	/* msec */
 
 #define MXT_BOOT_VALUE		0xa5
 #define MXT_BACKUP_VALUE		0x55
@@ -1553,7 +1553,9 @@ static void report_input_data(struct mxt_data *data)
 		input_report_abs(data->input_dev, ABS_MT_POSITION_X, data->fingers[i].x);
 		input_report_abs(data->input_dev, ABS_MT_POSITION_Y, data->fingers[i].y);
 		input_report_abs(data->input_dev, ABS_MT_TOUCH_MAJOR, data->fingers[i].z);
+		input_report_abs(data->input_dev, ABS_MT_PRESSURE, data->fingers[i].z);
 		input_report_abs(data->input_dev, ABS_MT_WIDTH_MAJOR, data->fingers[i].w);
+		input_report_abs(data->input_dev, BTN_TOUCH, data->fingers[i].w ? 1 : 0);
 		input_report_abs(data->input_dev, ABS_MT_TRACKING_ID, i);
 
 		#ifdef _SUPPORT_SHAPE_TOUCH_
@@ -3730,6 +3732,8 @@ static int __devinit mxt_probe(struct i2c_client *client, const struct i2c_devic
 			pdata->max_z, 0, 0);
 	input_set_abs_params(input_dev, ABS_MT_WIDTH_MAJOR, pdata->min_w,
 			pdata->max_w, 0, 0);
+	input_set_abs_params(input_dev, ABS_MT_PRESSURE, pdata->min_z,
+			pdata->max_z, 0, 0);
 	input_set_abs_params(input_dev, ABS_MT_TRACKING_ID, 0,
 			data->num_fingers - 1, 0, 0);
 
