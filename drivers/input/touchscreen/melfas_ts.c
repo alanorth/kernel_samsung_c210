@@ -137,7 +137,8 @@ do {     \
 	input_report_abs(ts->input_dev, ABS_MT_POSITION_X, x);             \
 	input_report_abs(ts->input_dev, ABS_MT_POSITION_Y, y);             \
 	input_report_abs(ts->input_dev, ABS_MT_TOUCH_MAJOR, amplitude);         \
-	input_report_abs(ts->input_dev, ABS_MT_WIDTH_MAJOR, width); \
+	input_report_abs(ts->input_dev, ABS_MT_PRESSURE, amplitude); \
+	input_report_key(ts->input_dev, BTN_TOUCH, 1); \
 	input_mt_sync(ts->input_dev);                                      \
 } while (0)
 
@@ -2136,7 +2137,7 @@ static int melfas_ts_probe(struct i2c_client *client, const struct i2c_device_id
 	input_set_abs_params(ts->input_dev, ABS_MT_POSITION_Y, 0, TS_MAX_Y_COORD, 0, 0);
 	input_set_abs_params(ts->input_dev, ABS_MT_TOUCH_MAJOR, 0, TS_MAX_Z_TOUCH, 0, 0);
 	input_set_abs_params(ts->input_dev, ABS_MT_TRACKING_ID, 0, MELFAS_MAX_TOUCH - 1, 0, 0);
-	input_set_abs_params(ts->input_dev, ABS_MT_WIDTH_MAJOR, 0, TS_MAX_W_TOUCH, 0, 0);
+	input_set_abs_params(ts->input_dev, ABS_MT_PRESSURE, 0, 255, 0, 0);
 
 //	__set_bit(EV_SYN, ts->input_dev->evbit);
 //	__set_bit(EV_KEY, ts->input_dev->evbit);
