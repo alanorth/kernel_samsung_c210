@@ -1,7 +1,7 @@
 #
 # Automatically generated make config: don't edit
 # Linux kernel version: 2.6.36
-# Sun Apr  1 01:44:27 2012
+# Sun Apr  1 01:52:21 2012
 #
 CONFIG_ARM=y
 CONFIG_HAVE_PWM=y
@@ -2266,6 +2266,7 @@ CONFIG_VIBETONZ=y
 # CONFIG_SAMSUNG_LTE is not set
 # CONFIG_SAMSUNG_LTE_BOOTLOADER is not set
 # CONFIG_SAMSUNG_LTE_MODEMCTL is not set
+CONFIG_J4FS=m
 CONFIG_SAMSUNG_PHONE_SVNET=y
 CONFIG_SUPPORT_SIMDETECT=y
 CONFIG_ACCESSORY=y
