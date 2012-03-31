@@ -6,5 +6,6 @@ $ make -jN CONFIG_INITRAMFS_SOURCE=path/to/initramfs/root
 
 p6810 can be replaced with one of the following other devices:
 
+p6200
 p6800
 p6810
