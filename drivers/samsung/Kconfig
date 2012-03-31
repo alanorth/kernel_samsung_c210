@@ -26,3 +26,9 @@ config SAMSUNG_LTE_MODEMCTL
 	default n
 	help
 		Say Y to enable CMC22x LTE modem.
+
+config J4FS
+	tristate "Samsung J4FS"
+	default m
+	help
+		Say Y to enable Samsung J4FS
