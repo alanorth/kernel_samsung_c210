@@ -444,7 +444,7 @@ static int max8997_set_voltage_buck(struct regulator_dev *rdev,
 	const struct vol_cur_map_desc *desc;
 	int buck = max8997_get_ldo(rdev);
 	int reg, shift = 0, mask, ret;
-	int difference = 0, previous_vol = 0;
+	int difference = 0, previous_vol = 0, current_vol = 0;
 	u8 data[7];
 
 	mutex_lock(&max8997->dvs_lock);
@@ -559,9 +559,13 @@ buck1_exit:
 	if (!max8997->buck_ramp_en)
 		goto out;
 
-	difference = desc->min + desc->step*i - previous_vol/1000;
-	udelay(difference / max8997->buck_ramp_delay);
+	current_vol = desc->min + desc->step*i;
+	if (previous_vol/1000 < current_vol)
+		difference = current_vol - previous_vol/1000;
+	else
+		difference = previous_vol/1000 - current_vol;
 
+	udelay(difference / max8997->buck_ramp_delay);
 out:
 	mutex_unlock(&max8997->dvs_lock);
 	return ret;

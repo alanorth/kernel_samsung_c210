@@ -1502,7 +1502,7 @@ static void s5p_hdmi_ctrl_set_bluescreen(bool en)
 	s5p_hdmi_reg_bluescreen(en);
 }
 
-static void s5p_hdmi_ctrl_set_audio(bool en)
+void s5p_hdmi_ctrl_set_audio(bool en)
 {
 	struct s5p_hdmi_ctrl_private_data       *ctrl = &s5p_hdmi_ctrl_private;
 

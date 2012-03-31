@@ -1028,10 +1028,10 @@ static int s5k5ccgx_set_sensor_mode(struct v4l2_subdev *sd, s32 val)
 }
 
 /* PX: Set framerate */
-static int s5k5ccgx_set_frame_rate(struct v4l2_subdev *sd, u32 fps)
+static int s5k5ccgx_set_frame_rate(struct v4l2_subdev *sd, s32 fps)
 {
 	struct s5k5ccgx_state *state = to_state(sd);
-	int err = 0;
+	int err = -EIO;
 	int i = 0, fps_index = -1;
 
 	cam_info("set frame rate %d\n", fps);
@@ -1040,6 +1040,7 @@ static int s5k5ccgx_set_frame_rate(struct v4l2_subdev *sd, u32 fps)
 		if (fps == s5k5ccgx_framerates[i].fps) {
 			fps_index = s5k5ccgx_framerates[i].index;
 			state->fps = fps;
+			state->req_fps = -1;
 			break;
 		}
 	}
@@ -1049,11 +1050,12 @@ static int s5k5ccgx_set_frame_rate(struct v4l2_subdev *sd, u32 fps)
 		return 0;
 	}
 
-	if (!state->hd_videomode)
+	if (!state->hd_videomode) {
 		err = s5k5ccgx_set_from_table(sd, "fps", state->regs->fps,
 				ARRAY_SIZE(state->regs->fps), fps_index);
+		CHECK_ERR_N_MSG(err, "fail to set framerate\n")
+	}
 
-	CHECK_ERR_N_MSG(err, "fail to set framerate\n")
 	return 0;
 }
 
@@ -1349,7 +1351,7 @@ static int s5k5ccgx_af_start_preflash(struct v4l2_subdev *sd)
 	msleep(200);
 
 	/* Check AE-stable */
-	if (state->flash_on) {
+	if (state->focus.preflash == PREFLASH_ON) {
 		/* Do checking AE-stable */
 		for (count = 0; count < AE_STABLE_SEARCH_COUNT; count++) {
 			if (state->focus.start == AUTO_FOCUS_OFF) {
@@ -1385,7 +1387,7 @@ static int s5k5ccgx_af_start_preflash(struct v4l2_subdev *sd)
 
 	/* If AF cancel, finish pre-flash process. */
 	if (state->focus.status == AF_RESULT_CANCELLED) {
-		if (state->flash_on) {
+		if (state->focus.preflash == PREFLASH_ON) {
 			s5k5ccgx_set_from_table(sd, "af_pre_flash_end",
 				&state->regs->af_pre_flash_end, 1, 0);
 			s5k5ccgx_set_from_table(sd, "flash_ae_clear",
@@ -1511,7 +1513,8 @@ check_done:
 		cam_dbg("%s: Single AF finished\n", __func__);
 	}
 
-	if (state->flash_on && !state->hd_videomode) {
+	if ((state->focus.preflash == PREFLASH_ON) &&
+	    (state->sensor_mode == SENSOR_CAMERA)) {
 		s5k5ccgx_set_from_table(sd, "af_pre_flash_end",
 				&state->regs->af_pre_flash_end, 1, 0);
 		s5k5ccgx_set_from_table(sd, "flash_ae_clear",
@@ -1556,7 +1559,7 @@ static int s5k5ccgx_set_af(struct v4l2_subdev *sd, s32 val)
 		/* state->focus.af_cancel = 0; */
 		state->focus.status = AF_RESULT_DOING;
 
-		if (!state->hd_videomode) {
+		if (state->sensor_mode == SENSOR_CAMERA) {
 			state->one_frame_delay_ms = ONE_FRAME_DELAY_MS_NORMAL;
 			err = s5k5ccgx_af_start_preflash(sd);
 			if (unlikely(err))
@@ -2519,18 +2522,15 @@ static int s5k5ccgx_s_parm(struct v4l2_subdev *sd,
 	int err = 0;
 	struct s5k5ccgx_state *state = to_state(sd);
 
-	u32 fps = param->parm.capture.timeperframe.denominator /
+	state->req_fps = param->parm.capture.timeperframe.denominator /
 			param->parm.capture.timeperframe.numerator;
 
-	cam_trace("E fps=%d\n", fps);
+	cam_dbg("s_parm fps=%d, req_fps=%d\n", state->fps, state->req_fps);
 
-	if (fps != state->fps) {
-		if (fps < 0 || fps > 30) {
-			cam_err("%s: ERROR, invalid frame rate %d\n",
-						__func__, fps);
-			fps = 30;
-		}
-		state->req_fps = fps;
+	if ((state->req_fps < 0) || (state->req_fps > 30)) {
+		cam_err("%s: ERROR, invalid frame rate %d. we'll set to 30\n",
+				__func__, state->req_fps);
+		state->req_fps = 30;
 	}
 
 	if (state->initialized && (state->scene_mode == SCENE_MODE_NONE)) {
@@ -2901,8 +2901,10 @@ static int s5k5ccgx_init(struct v4l2_subdev *sd, u32 val)
 	if ((state->sensor_mode == SENSOR_MOVIE) && !state->hd_videomode)
 		s5k5ccgx_init_param(sd);
 
-	if (state->fps != state->req_fps)
+	if (state->req_fps >= 0) {
 		err = s5k5ccgx_set_frame_rate(sd, state->req_fps);
+		CHECK_ERR(err);
+	}
 
 	return 0;
 }
@@ -2954,7 +2956,8 @@ static int s5k5ccgx_s_config(struct v4l2_subdev *sd,
 	state->sensor_mode = SENSOR_CAMERA;
 	state->hd_videomode = false;
 	state->format_mode = V4L2_PIX_FMT_MODE_PREVIEW;
-	state->fps = state->req_fps = 0;
+	state->fps = 0;
+	state->req_fps = -1;
 
 	for (i = 0; i < ARRAY_SIZE(s5k5ccgx_ctrls); i++)
 		s5k5ccgx_ctrls[i].value = s5k5ccgx_ctrls[i].default_value;

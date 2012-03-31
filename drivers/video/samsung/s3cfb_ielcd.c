@@ -125,7 +125,7 @@ int s3c_ielcd_stop(void)
 
 	do {
 		if (++ielcd_count > 2000000) {
-			printk(KERN_ERR "ielcd off fail\n");
+			printk("ielcd off fail\n");
 			return 1;
 		}
 
@@ -187,7 +187,7 @@ int s3c_ielcd_init_global(struct s3cfb_global *ctrl)
 
 	return 0;
 }
-#if 0
+
 int s3c_ielcd_set_clock(struct s3cfb_global *ctrl)
 {
 	*ielcd_fbdev = *ctrl;
@@ -196,7 +196,6 @@ int s3c_ielcd_set_clock(struct s3cfb_global *ctrl)
 	/*clk_enable(ielcd_clock);*/
 	return 0;
 }
-#endif
 
 /*
 module_init(s3c_ielcd_hw_init);

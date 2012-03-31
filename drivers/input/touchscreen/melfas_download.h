@@ -148,9 +148,10 @@ void mcsdl_vdd_off(void);
 //----------------------------------------------------
 
 int mcsdl_download_binary_data(int);			// with binary type .c   file.
+int mcsdl_download_binary_data_verify(int);
 int mcsdl_download_binary_file(void);			// with binary type .bin file.
 
-int mms100_ISC_download_binary_data(bool, INT8);
+int mms100_ISC_download_binary_data(int, INT8);
 int mms100_ISC_download_binary_file(void);
 
 //---------------------------------

@@ -73,13 +73,13 @@ mali_dvfs_staycount_table mali_dvfs_staycount[MALI_DVFS_STEPS]={
 /*dvfs threshold*/
 mali_dvfs_threshold_table mali_dvfs_threshold[MALI_DVFS_STEPS]={
 #if 1
-		/*step 0*/{((int)((255*0)/100))   ,((int)((255*85)/100))},
-		/*step 1*/{((int)((255*65)/100))  ,((int)((255*100)/100))},
-		/*step 2*/{((int)((255*98)/100))  ,((int)((255*100)/100))} };
+		/*step 0*/{((int)((400*0)/100)) , ((int)((400*85)/100))},
+		/*step 1*/{((int)((400*65)/100)), ((int)((400*100)/100))},
+		/*step 2*/{((int)((400*98)/100)), ((int)((400*100)/100))} };
 #else
-		/*step 0*/{((int)((255*0)/100))   ,((int)((255*82)/100))},
-		/*step 1*/{((int)((255*75)/100))  ,((int)((255*95)/100))},
-		/*step 2*/{((int)((255*98)/100))  ,((int)((255*100)/100))} };
+		/*step 0*/{((int)((400*0)/100)) , ((int)((400*82)/100))},
+		/*step 1*/{((int)((400*75)/100)), ((int)((400*95)/100))},
+		/*step 2*/{((int)((400*98)/100)), ((int)((400*100)/100))} };
 #endif
 
 /*dvfs status*/
@@ -127,7 +127,7 @@ static unsigned int asv_3d_volt_8_table[ASV_8_LEVEL][MALI_DVFS_STEPS] = {
 };
 #endif
 
-static u32 mali_dvfs_utilization = 255;
+static u32 mali_dvfs_utilization = 400;
 
 static void mali_dvfs_work_handler(struct work_struct *w);
 

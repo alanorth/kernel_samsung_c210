@@ -184,20 +184,11 @@ void acc_notified(struct acc_con_info *acc, int acc_adc)
 			env_ptr = "ACCESSORY=carmount";
 			acc->current_accessory = ACCESSORY_CARMOUNT;
 #endif
-#if defined(CONFIG_MACH_P2_REV00) || defined(CONFIG_MACH_P2_REV01)
-	|| defined(CONFIG_MACH_P2_REV02)
 		} else if ((1800 < acc_adc) && (2350 > acc_adc)) {
 			/* 4 pole earjack, No warranty 2000 */
 			env_ptr = "ACCESSORY=lineout";
 			acc->current_accessory = ACCESSORY_LINEOUT;
 			switch_set_state(&acc->ear_jack_switch, 1);
-#else
-		} else if ((1700 < acc_adc) && (2350 > acc_adc)) {
-			/* 4 pole earjack, No warranty 2000 */
-			env_ptr = "ACCESSORY=lineout";
-			acc->current_accessory = ACCESSORY_LINEOUT;
-			switch_set_state(&acc->ear_jack_switch, 1);
-#endif
 		} else if ((2450 < acc_adc) && (2850 > acc_adc)) {
 			/* otg 2730 */
 			env_ptr = "ACCESSORY=OTG";
@@ -309,7 +300,7 @@ static void check_acc_dock(struct acc_con_info *acc)
 			("[30PIN] keyboard dock station attached!!!");
 			switch_set_state(&acc->dock_switch,
 				UEVENT_DOCK_KEYBOARD);
-		} else
+		}else
 #endif
 		{
 #ifdef CONFIG_MHL_SII9234

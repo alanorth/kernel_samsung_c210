@@ -674,12 +674,6 @@ static void bcsp_timed_event(unsigned long arg)
 
 	BT_DBG("hu %p retransmitting %u pkts", hu, bcsp->unack.qlen);
 
-	if (bcsp == NULL)
-	    return;
-
-	if (&(bcsp->unack) == NULL)
-	    return;
-
 	spin_lock_irqsave_nested(&bcsp->unack.lock, flags, SINGLE_DEPTH_NESTING);
 
 	while ((skb = __skb_dequeue_tail(&bcsp->unack)) != NULL) {

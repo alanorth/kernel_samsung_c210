@@ -35,6 +35,10 @@ source "drivers/media/video/samsung/mali/Kconfig"
 source "drivers/media/video/samsung/ump/Kconfig"
 endif
 
+if CPU_S5PV310 && (MACH_C1_REV01 || MACH_C1_REV02)
+source "drivers/media/video/samsung/mhl_v1/Kconfig"
+endif
+
 if VIDEO_SAMSUNG
 comment "Reserved memory configurations"
 config VIDEO_SAMSUNG_MEMSIZE_FIMC0

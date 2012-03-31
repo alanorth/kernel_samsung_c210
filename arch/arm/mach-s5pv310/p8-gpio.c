@@ -62,12 +62,6 @@ static struct gpio_init_data c1_init_gpios[] = {
 		.val	= S3C_GPIO_SETPIN_ZERO,
 		.pud	= S3C_GPIO_PULL_NONE,
 		.drv	= S5P_GPIO_DRVSTR_LV2,
-	}, {
-		.num	= S5PV310_GPX0(4), /*TA_nCHG*/
-		.cfg	= S3C_GPIO_INPUT,
-		.val	= S3C_GPIO_SETPIN_NONE,
-		.pud	= S3C_GPIO_PULL_UP,
-		.drv	= S5P_GPIO_DRVSTR_LV4,
 	},
 	/* BT UART */
 	{GPIO_BT_RXD, S3C_GPIO_SFN(2), 2, S3C_GPIO_PULL_UP},
@@ -372,8 +366,6 @@ static unsigned int c1_sleep_gpio_table[][3] = {
 	{ S5PV310_GPL2(5),  S3C_GPIO_SLP_INPUT,	S3C_GPIO_PULL_DOWN}, /* NC */
 	{ S5PV310_GPL2(6),  S3C_GPIO_SLP_PREV,	S3C_GPIO_PULL_NONE},
 	{ S5PV310_GPL2(7),  S3C_GPIO_SLP_OUT0,	S3C_GPIO_PULL_NONE},
-
-	{ S5PV310_GPX0(4), S3C_GPIO_SLP_INPUT, S3C_GPIO_PULL_UP}, /* TA_nCHG */
 
 	{ S5PV310_GPY0(0),  S3C_GPIO_SLP_INPUT,	S3C_GPIO_PULL_DOWN}, /* NC */
 	{ S5PV310_GPY0(1),  S3C_GPIO_SLP_INPUT,	S3C_GPIO_PULL_DOWN}, /* NC */

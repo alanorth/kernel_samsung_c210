@@ -411,10 +411,16 @@ void android_register_function(struct android_usb_function *f)
 				get_product_id(dev));
 		dev->cdev->desc.idProduct = device_desc.idProduct;
 		dev->cdev->desc.idVendor = device_desc.idVendor;
-		/* usb phy enable when usb cable attach
-		 *  so, we don't need to call udc enable  function
-		 */
-		printk(KERN_INFO "usb: don't enable usb phy\n");
+#ifdef CONFIG_USB_ANDROID_USB_PHY_CONTROL
+		printk(KERN_INFO "usb: don't enable udc\n");
+#else
+		if (dev->cdev->gadget->ops->vbus_session) {
+			printk(KERN_INFO "usb: udc_enable\n");
+			dev->cdev->gadget->ops->vbus_session(
+					dev->cdev->gadget, 1);
+		} else
+			printk(KERN_INFO "usb: no vbus_session func\n");
+#endif
 	}
 
 	printk(KERN_DEBUG "usb: android get product=0x%p, PID=0x%x\n",

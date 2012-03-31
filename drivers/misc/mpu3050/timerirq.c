@@ -1,18 +1,21 @@
 /*
-$License:
-Copyright (C) 2010 InvenSense Corporation, All Rights Reserved.
-This program is free software; you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation; either version 2 of the License, or
-(at your option) any later version.
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <http://www.gnu.org/licenses/>.
-$
-*/
+ $License:
+    Copyright (C) 2010 InvenSense Corporation, All Rights Reserved.
+
+    This program is free software; you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 2 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+  $
+ */
 #include <linux/interrupt.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
@@ -156,8 +159,7 @@ static ssize_t timerirq_read(struct file *file,
 	int len, err;
 	struct timerirq_data *data = file->private_data;
 
-	if (!data->data_ready &&
-		data->timeout) {
+	if (!data->data_ready) {
 		wait_event_interruptible_timeout(data->timerirq_wait,
 						 data->data_ready,
 						 data->timeout);
@@ -180,8 +182,7 @@ static ssize_t timerirq_read(struct file *file,
 	return len;
 }
 
-static unsigned int timerirq_poll(struct file *file,
-				struct poll_table_struct *poll)
+unsigned int timerirq_poll(struct file *file, struct poll_table_struct *poll)
 {
 	int mask = 0;
 	struct timerirq_data *data = file->private_data;

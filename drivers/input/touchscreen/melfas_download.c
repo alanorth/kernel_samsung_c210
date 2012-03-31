@@ -25,6 +25,10 @@
 #include <linux/uaccess.h>
 #define MELFAS_FW1 "/sdcard/Master.bin"
 
+#include <plat/regs-watchdog.h>
+#include <mach/map.h>
+#define TPS 3200
+#define TSP_FW_WATCHDOG	1
 
 //============================================================
 //
@@ -42,13 +46,9 @@
 //rev 0,1
 #include "GFS_01x04.c"
 //rev 2~
-#ifdef CONFIG_TOUCHSCREEN_P2_NTT
-#include "GFS_03x09_NTT.c"
-#else
-#include "GFS_03x08.c"
-#endif
+#include "GFS_03x14.c"
 #include "G2M_12x09.c"
-#include "GFD_26x04.c"
+#include "GFD_26x07.c"
 
 // TEST
 #include "TEST_FW.c"
@@ -82,6 +82,9 @@ static void mcsdl_unselect_isp_mode(void);
 static void mcsdl_read_32bits(UINT8 *pData);
 static void mcsdl_write_bits(UINT32 wordData, int nBits);
 static void mcsdl_scl_toggle_twice(void);
+
+static int mcsdl_download_verify(const UINT8 *pData, const UINT16 nLength, INT8 IdxNum);
+static int mcsdl_verify_flash_all(UINT8 *pData, UINT16 nLength,	INT8 IdxNum);
 
 //---------------------------------
 //	Delay functions
@@ -183,7 +186,7 @@ int mcsdl_download_binary_data(int touch_id)
 				nRet = mcsdl_download((const UINT8*) MELFAS_binary_3,(const UINT16) MELFAS_binary_nLength_3, 0);
 			}else if(touch_id == 3){
 				pr_info("[TSP] G2W F/W ISP update");
-//				nRet = mcsdl_download((const UINT8*) MELFAS_binary_1,(const UINT16) MELFAS_binary_nLength_1, 0);
+//				nRet = mcsdl_download((const UINT8*) MELFAS_binary_4,(const UINT16) MELFAS_binary_nLength_4, 0);
 			}else{
 				pr_info("[TSP] Test F/W Version update");
 				nRet = mcsdl_download((const UINT8*) MELFAS_binary,(const UINT16) MELFAS_binary_nLength, 0);
@@ -195,6 +198,25 @@ int mcsdl_download_binary_data(int touch_id)
 
 	if(i != 0)
 		pr_info("[TSP] ISP D/W try count : %d",i);
+	return nRet;
+}
+
+int mcsdl_download_binary_data_verify(int touch_id)
+{
+	int nRet = 0;
+
+	if (touch_id == 0)
+		nRet = mcsdl_download_verify((const UINT8 *) MELFAS_binary_1, (const UINT16) MELFAS_binary_nLength_1, 0);
+	else if (touch_id == 1)
+		nRet = mcsdl_download_verify((const UINT8 *) MELFAS_binary_2, (const UINT16) MELFAS_binary_nLength_2, 0);
+	else if (touch_id == 2)
+		nRet = mcsdl_download_verify((const UINT8 *) MELFAS_binary_3, (const UINT16) MELFAS_binary_nLength_3, 0);
+	else if (touch_id == 3)
+		pr_info("[TSP] mcsdl_download_binary_data_verify G2W");
+//		nRet = mcsdl_download_verify((const UINT8 *) MELFAS_binary_4,(const UINT16) MELFAS_binary_nLength_4, 0);
+	else
+		nRet = mcsdl_download_verify((const UINT8 *) MELFAS_binary, (const UINT16) MELFAS_binary_nLength, 0);
+
 	return nRet;
 }
 
@@ -256,6 +278,25 @@ int mcsdl_download_binary_file(void)
 
 }
 
+static int mcsdl_download_verify(const UINT8 *pBianry, const UINT16 unLength,
+		INT8 IdxNum)
+{
+	int nRet;
+
+	mcsdl_set_ready();
+	msleep(200);
+
+	printk("[TSP] mcsdl_download_verify ");
+	preempt_disable();
+	nRet = mcsdl_verify_flash_all((UINT8 *) pBianry, (UINT16) unLength, IdxNum);
+	preempt_enable();
+
+	mcsdl_reboot_mcs();
+
+	return nRet;
+}
+
+
 //------------------------------------------------------------------
 //
 //	Download function
@@ -311,6 +352,11 @@ static int mcsdl_download(const UINT8 *pBianry, const UINT16 unLength,
 	printk(" > Program   ");
 #endif
 
+#if TSP_FW_WATCHDOG
+	writel(20 * TPS, S3C2410_WTCNT);
+	pr_info("[TSP] Watchdog kicking Before Flash");
+#endif
+
 	preempt_disable();
 	nRet = mcsdl_program_flash((UINT8*) pBianry, (UINT16) unLength, IdxNum);
 	preempt_enable();
@@ -323,6 +369,11 @@ static int mcsdl_download(const UINT8 *pBianry, const UINT16 unLength,
 
 #if MELFAS_ENABLE_DBG_PROGRESS_PRINT
 	printk(" > Verify    ");
+#endif
+
+#if TSP_FW_WATCHDOG
+	writel(20 * TPS, S3C2410_WTCNT);
+	pr_info("[TSP] Watchdog kicking Before Verify");
 #endif
 
 	preempt_disable();
@@ -343,6 +394,11 @@ static int mcsdl_download(const UINT8 *pBianry, const UINT16 unLength,
 #if MELFAS_ENABLE_DBG_PROGRESS_PRINT
 	printk(" > Rebooting\n");
 	printk(" - Fin.\n\n");
+#endif
+
+#if TSP_FW_WATCHDOG
+	writel(20 * TPS, S3C2410_WTCNT);
+	pr_info("[TSP] Watchdog kicking After F/W update");
 #endif
 
 	mcsdl_reboot_mcs();
@@ -503,6 +559,78 @@ static void mcsdl_program_flash_part(UINT8 *pData)
 	data |= (UINT32) pData[3] << 24;
 	mcsdl_write_bits(data, 32);
 
+}
+
+static int mcsdl_verify_flash_all(UINT8 *pDataOriginal, UINT16 unLength,
+		INT8 IdxNum)
+{
+	int i, j;
+	int nRet = MCSDL_RET_SUCCESS;
+
+	UINT8 *pData;
+	UINT8 ucLength;
+
+	UINT16 addr;
+	UINT32 wordData;
+
+	addr = 0;
+	pData = (UINT8 *) pDataOriginal;
+
+	ucLength = MELFAS_TRANSFER_LENGTH;
+
+	while ((addr * 4) < (int) unLength)	{
+
+		if ((unLength - (addr * 4)) < MELFAS_TRANSFER_LENGTH)
+			ucLength = (UINT8)(unLength - (addr * 4));
+
+		mcsdl_delay(MCSDL_DELAY_40US);
+
+		if (IdxNum > 0)
+			mcsdl_select_isp_mode(ISP_MODE_NEXT_CHIP_BYPASS);
+		mcsdl_select_isp_mode(ISP_MODE_SERIAL_READ);
+
+		wordData = ((addr & 0x1FFF) << 1) | 0x0;
+		wordData <<= 14;
+
+		mcsdl_write_bits(wordData, 18);
+
+		addr += 1;
+
+		mcsdl_read_flash(ucVerifyBuffer);
+
+		MCSDL_GPIO_SDA_SET_HIGH();
+
+		for (i = 0; i < 6; i++) {
+
+			if (i == 2)
+				mcsdl_delay(MCSDL_DELAY_3US);
+			else if (i == 3)
+				mcsdl_delay(MCSDL_DELAY_40US);
+
+			MCSDL_GPIO_SCL_SET_HIGH();
+			mcsdl_delay(MCSDL_DELAY_10US);
+			MCSDL_GPIO_SCL_SET_LOW();
+			mcsdl_delay(MCSDL_DELAY_10US);
+		}
+
+		for (j = 0; j < (int) ucLength; j++) {
+			if (ucVerifyBuffer[j] != pData[j]) {
+				pr_info("[TSP][Err] Addr : 0x%04X : 0x%02X - 0x%02X", addr, pData[j], ucVerifyBuffer[j]);
+				nRet |= MCSDL_RET_PROGRAM_VERIFY_FAILED;
+			}
+		}
+
+		pData += ucLength;
+		mcsdl_unselect_isp_mode();
+	}
+
+	nRet |= MCSDL_RET_SUCCESS;
+
+	MCSDL_VERIFY_FLASH_FINISH:
+
+	mcsdl_unselect_isp_mode();
+
+	return nRet;
 }
 
 static int mcsdl_verify_flash(UINT8 *pDataOriginal, UINT16 unLength,

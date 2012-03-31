@@ -377,6 +377,9 @@ CONFIG_MACH_C1=y
 CONFIG_MACH_P2_REV02=y
 # CONFIG_MACH_P8LTE_REV00 is not set
 
+CONFIG_IR_REMOCON=y
+# CONFIG_IR_REMOCON_EUR is not set
+
 #
 # MMC/SD slot setup
 #
@@ -408,7 +411,7 @@ CONFIG_SEC_DEBUG_SCHED_LOG=y
 CONFIG_SEC_DEBUG_USER=y
 # CONFIG_SEC_DEBUG_PM_TEMP is not set
 # CONFIG_SEC_DEBUG_IRQ_EXIT_LOG is not set
-CONFIG_S5PV310_WATCHDOG_RESET=y
+# CONFIG_S5PV310_WATCHDOG_RESET is not set
 
 #
 # Support dynamic cpu hotplug (Experimental)
@@ -866,7 +869,7 @@ CONFIG_RPS=y
 # CONFIG_NET_DROP_MONITOR is not set
 # CONFIG_HAMRADIO is not set
 # CONFIG_CAN is not set
-CONFIG_IRDA=y
+# CONFIG_IRDA is not set
 
 #
 # IrDA protocols

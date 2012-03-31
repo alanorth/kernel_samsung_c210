@@ -30,7 +30,7 @@
 
 #define FRM_RATIO(w, h)		((w)*10/(h))
 
-enum {
+typedef enum {
 	FRM_RATIO_QCIF = 12,
 	FRM_RATIO_VGA = 13,
 	FRM_RATIO_D1 = 15,
@@ -199,6 +199,36 @@ void s3c_csis_start(int csis_id, int lanes, int settle, \
 void s3c_csis_stop(int csis_id) {}
 #endif
 
+#ifdef CONFIG_VIDEO_IMPROVE_STREAMOFF
+static int fimc_wait_sensor_steamoff(struct fimc_control *ctrl)
+{
+	struct s3c_platform_camera *cam = ctrl->cam;
+	unsigned int inner_elapsed_usec = 0;
+
+	if (unlikely(cam->type != CAM_TYPE_MIPI))
+		return 0;
+
+	do_gettimeofday(&ctrl->curr_time);
+
+	inner_elapsed_usec = \
+		(ctrl->curr_time.tv_sec - ctrl->before_time.tv_sec) \
+		* USEC_PER_SEC \
+		+ ctrl->curr_time.tv_usec - ctrl->before_time.tv_usec;
+	inner_elapsed_usec = inner_elapsed_usec / 1000;
+
+	/* printk(KERN_INFO "\n\nfront cam stream off remain time = %dms\n",
+				inner_elapsed_usec);*/
+
+	if (cam->streamoff_delay > inner_elapsed_usec) {
+		/* printk(KERN_INFO "stream off added msleep = %dms\n",
+			cam->streamoff_delay - inner_elapsed_usec); */
+		msleep(cam->streamoff_delay - inner_elapsed_usec);
+	}
+
+	return 0;
+}
+#endif
+
 static int fimc_init_camera(struct fimc_control *ctrl)
 {
 	struct fimc_global *fimc = get_fimc_dev();
@@ -270,8 +300,13 @@ retry:
 			fimc_err("Retry power on(%d/3)\n\n", retry_cnt);
 			goto retry;
 		}
-	} else
+	} else {
+#ifdef CONFIG_VIDEO_IMPROVE_STREAMOFF
+		if (cam->type == CAM_TYPE_MIPI)
+			do_gettimeofday(&ctrl->before_time);
+#endif
 		cam->initialized = 1;
+	}
 
 	return ret;
 }
@@ -683,18 +718,19 @@ int fimc_s_input(struct file *file, void *fh, unsigned int i)
 		/* assign to ctrl */
 		ctrl->cap = cap;
 #if (defined(CONFIG_S5PV310_DEV_PD) && defined(CONFIG_PM_RUNTIME))
-		if (ctrl->power_status == FIMC_POWER_OFF)
+		if (ctrl->power_status == FIMC_POWER_OFF) {
 			pm_runtime_get_sync(&pdev->dev);
+		}
 #endif
 	} else {
 		memset(cap, 0, sizeof(*cap));
 	}
 
 #if 0
-	if (fimc->active_camera == 0) {
+   	if (fimc->active_camera == 0) {
 		if (!ctrl->cam->initialized)
 			ret = fimc_init_camera(ctrl);
-
+		
 		if (unlikely(ret < 0)) {
 			if (ret == -ENOSYS) {
 				/* return no error If firmware is bad.
@@ -886,7 +922,7 @@ int fimc_s_fmt_vid_capture(struct file *file, void *fh, struct v4l2_format *f)
 	/* rotaton, flip, dtp_mode, movie_mode and vt_mode should be maintained */
 #if defined(CONFIG_VIDEO_HD_SUPPORT)
 	memset(cap, 0, sizeof(*cap) - sizeof(u32)*6);
-#else
+#else	
 	memset(cap, 0, sizeof(*cap) - sizeof(u32)*5);
 #endif
 
@@ -1343,7 +1379,7 @@ int fimc_querybuf_capture(void *fh, struct v4l2_buffer *b)
 		b->length = ctrl->cap->bufs[b->index].length[0]
 			+ ctrl->cap->bufs[b->index].length[1];
 		break;
-	case V4L2_PIX_FMT_NV12:		/* fall through */
+	case V4L2_PIX_FMT_NV12: 	/* fall through */
 	case V4L2_PIX_FMT_NV12T:
 		b->length = ALIGN(ctrl->cap->bufs[b->index].length[0], SZ_64K)
 			+ ALIGN(ctrl->cap->bufs[b->index].length[1], SZ_64K);
@@ -1453,7 +1489,7 @@ int fimc_s_ctrl_capture(void *fh, struct v4l2_control *c)
 		if (fimc->mclk_status == CAM_MCLK_ON) {
 			if (ctrl->cam->cam_power)
 				ctrl->cam->cam_power(0);
-
+			
 			/* shutdown the MCLK */
 			clk_disable(ctrl->cam->clk);
 			fimc->mclk_status = CAM_MCLK_OFF;
@@ -1486,12 +1522,10 @@ int fimc_s_ctrl_capture(void *fh, struct v4l2_control *c)
 			/* shutdown the MCLK */
 			clk_disable(ctrl->cam->clk);
 			fimc->mclk_status = CAM_MCLK_OFF;
+
 			ctrl->cam->initialized = 0;
 
-			/* 5ms -> 100ms: increase delay.
-			 * There are cases that sensor doesn't get revived
-			 * inspite of doing power reset.*/
-			msleep(100);
+			msleep(5);
 		}
 		ret = fimc_init_camera(ctrl);
 		break;
@@ -1574,9 +1608,7 @@ int fimc_s_ctrl_capture(void *fh, struct v4l2_control *c)
 #if defined(CONFIG_VIDEO_HD_SUPPORT)
 		printk(KERN_INFO "%s: CAMERA_SENSOR_MODE=%d\n",
 				__func__, c->value);
-#ifdef CONFIG_VIDEO_S5K5CCGX_P2
 		if ((fimc->active_camera == 0) && (c->value < 2))
-#endif
 			if (!ctrl->cam->initialized)
 				ret = fimc_init_camera(ctrl);
 #endif
@@ -1588,7 +1620,7 @@ int fimc_s_ctrl_capture(void *fh, struct v4l2_control *c)
 		break;
 
 	case V4L2_CID_CAMERA_CHECK_DATALINE:
-		if (ctrl->cap->dtp_mode == c->value) {
+		if (ctrl->cap->dtp_mode == c->value) {			
 			ret = 0;
 			break;
 		} else {
@@ -1601,9 +1633,11 @@ int fimc_s_ctrl_capture(void *fh, struct v4l2_control *c)
 				/* shutdown the MCLK */
 				clk_disable(ctrl->cam->clk);
 				fimc->mclk_status = CAM_MCLK_OFF;
+
 				ctrl->cam->initialized = 0;
 
 				msleep(100);
+
 				ret = fimc_init_camera(ctrl);
 			}
 			ctrl->cap->dtp_mode = c->value;
@@ -1773,9 +1807,7 @@ int fimc_streamon_capture(void *fh)
 {
 	struct fimc_control *ctrl = fh;
 	struct fimc_capinfo *cap = ctrl->cap;
-#if !defined(CONFIG_VIDEO_IMPROVE_STREAMOFF)
 	struct fimc_global *fimc = get_fimc_dev();
-#endif
 	struct v4l2_frmsizeenum cam_frmsize;
 
 	int rot = 0, i;
@@ -1866,8 +1898,7 @@ int fimc_streamon_capture(void *fh)
 #endif
 				}
 #else
-				v4l2_subdev_call(cam->sd, video, s_stream,
-						STREAM_MODE_WAIT_OFF);
+				fimc_wait_sensor_steamoff(ctrl);
 #endif
 
 				if (cam->id == CAMERA_CSI_C) {
@@ -1973,8 +2004,9 @@ int fimc_streamon_capture(void *fh)
 			fimc_add_outqueue(ctrl, i);
 	}
 
-	if (ctrl->cap->fmt.colorspace == V4L2_COLORSPACE_JPEG)
+	if (ctrl->cap->fmt.colorspace == V4L2_COLORSPACE_JPEG) {
 		fimc_hwset_scaler_bypass(ctrl);
+	}
 
 	ctrl->cap->cnt = 0;
 	fimc_start_capture(ctrl);
@@ -2010,8 +2042,10 @@ int fimc_streamoff_capture(void *fh)
 	fimc_stop_capture(ctrl);
 
 #ifdef CONFIG_VIDEO_IMPROVE_STREAMOFF
-	if ((ctrl->id != FIMC2) && (ctrl->cam->type == CAM_TYPE_MIPI))
+	if (ctrl->cam->type == CAM_TYPE_MIPI) {
 		v4l2_subdev_call(ctrl->cam->sd, video, s_stream, STREAM_MODE_CAM_OFF);
+		do_gettimeofday(&ctrl->before_time);
+	}
 #endif
 
 	/* wait for stop hardware */
@@ -2034,8 +2068,7 @@ int fimc_streamoff_capture(void *fh)
 		fimc_hwset_reset(ctrl);
 		printk(KERN_INFO "fimc0 hwrst--\n");
 #if !defined(CONFIG_VIDEO_IMPROVE_STREAMOFF)
-		v4l2_subdev_call(ctrl->cam->sd, video, s_stream,
-				STREAM_MODE_CAM_OFF);
+		v4l2_subdev_call(ctrl->cam->sd, video, s_stream, 0);
 #endif
 	} else {
 		printk(KERN_INFO "fimc2 hwrst++\n");
@@ -2045,8 +2078,9 @@ int fimc_streamoff_capture(void *fh)
 	}
 
 	/* Set FIMD to write back */
-	if ((ctrl->cam->id == CAMERA_WB) || (ctrl->cam->id == CAMERA_WB_B))
+	if ((ctrl->cam->id == CAMERA_WB) || (ctrl->cam->id == CAMERA_WB_B)) {
 		s3cfb_direct_ioctl(0, S3CFB_SET_WRITEBACK, 0);
+	}
 
 	/* disable camera power */
 	/* cam power off should call in the subdev release function */
@@ -2094,8 +2128,9 @@ int fimc_qbuf_capture(void *fh, struct v4l2_buffer *b)
 #if defined(CONFIG_MACH_P2_REV02) || defined(CONFIG_MACH_P2_REV01) \
 	|| defined(CONFIG_MACH_P2_REV00)
 	/* temp : debug msg */
-	if ((cap->cnt < 20) && (ctrl->id == 2))
-		printk(KERN_INFO "%s, fimc%d, cnt[%d]\n", __func__, ctrl->id, cap->cnt);
+	if ((cap->cnt < 20)&&(ctrl->id == 2)) {
+		printk(KERN_INFO "%s, fimc%d, cnt[%d]\n", __func__,ctrl->id, cap->cnt);
+	}
 #endif
 
 	mutex_unlock(&ctrl->v4l2_buf_lock);

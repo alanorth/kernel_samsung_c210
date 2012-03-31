@@ -197,98 +197,6 @@ static int s3cfb_sysfs_store_win_power(struct device *dev,
 	return len;
 }
 
-#ifdef CONFIG_FB_S3C_MIPI_LCD
-static int s3cfb_sysfs_show_fimd_register(struct device *dev,
-				struct device_attribute *attr, char *buf)
-{
-	struct s3cfb_global *fbdev[1];
-	fbdev[0] = fbfimd->fbdev[0];
-
-	s3cfb_register_read(fbdev[0]);
-
-	return strlen(buf);
-}
-
-static int s3cfb_sysfs_store_fimd_register(struct device *dev,
-				struct device_attribute *attr,
-				const char *buf, size_t len)
-{
-	int addr, value;
-	struct s3cfb_global *fbdev[1];
-	fbdev[0] = fbfimd->fbdev[0];
-
-	sscanf(buf, "%x %x", &addr, &value);
-
-	s3cfb_register_write(fbdev[0], addr, value);
-
-	return len;
-}
-
-static int s3cfb_sysfs_show_dsim_register(struct device *dev,
-				struct device_attribute *attr, char *buf)
-{
-	s5p_dsim_register_read();
-
-	return strlen(buf);
-}
-
-static int s3cfb_sysfs_store_dsim_register(struct device *dev,
-				struct device_attribute *attr,
-				const char *buf, size_t len)
-{
-	int addr, value;
-
-	sscanf(buf, "%x %x", &addr, &value);
-
-	s5p_dsim_register_write(addr, value);
-
-	return len;
-}
-
-static int s3cfb_sysfs_store_lcd_power(struct device *dev,
-				struct device_attribute *attr,
-				const char *buf, size_t len)
-{
-	int power;
-
-	sscanf(buf, "%d", &power);
-
-	if (power == 0) {
-		s6e8ax0_early_suspend();
-		s5p_dsim_early_suspend();
-	} else if (power == 1) {
-		s5p_dsim_late_resume();
-
-		if (s5p_dsim_fifo_clear() == 0) {
-			s5p_dsim_early_suspend();
-			msleep(10);
-			s5p_dsim_late_resume();
-			if (s5p_dsim_fifo_clear() == 0)
-				printk(KERN_ERR "dsim resume fail!!!\n");
-		}
-
-		msleep(10);
-
-		s6e8ax0_late_resume();
-	} else if (power == 2)
-		s6e8ax0_early_suspend();
-	else if (power == 3)
-		s6e8ax0_late_resume();
-
-	return len;
-}
-
-static DEVICE_ATTR(lcd_power, 0664,
-	NULL, s3cfb_sysfs_store_lcd_power);
-
-static DEVICE_ATTR(fimd_register, 0664,
-	s3cfb_sysfs_show_fimd_register, s3cfb_sysfs_store_fimd_register);
-
-
-static DEVICE_ATTR(dsim_register, 0664,
-	s3cfb_sysfs_show_dsim_register, s3cfb_sysfs_store_dsim_register);
-#endif
-
 static DEVICE_ATTR(win_power, 0664,
 	s3cfb_sysfs_show_win_power, s3cfb_sysfs_store_win_power);
 
@@ -317,7 +225,7 @@ static int s3cfb_sysfs_store_mdnie_power(struct device *dev,
 			s3c_mdnie_init_global(fbdev[i]);
 			s3c_mdnie_start(fbdev[i]);
 		}
-		printk(KERN_INFO "s3cfb_sysfs_store_mdnie_power() is called : mDNIE is ON\n");
+		printk("s3cfb_sysfs_store_mdnie_power() is called : mDNIE is ON\n");
 	} else {
 		for (i = 0; i < FIMD_MAX; i++) {
 			fbdev[i] = fbfimd->fbdev[i];
@@ -329,7 +237,7 @@ static int s3cfb_sysfs_store_mdnie_power(struct device *dev,
 			s3c_mdnie_stop();
 			s3c_mdnie_off();
 		}
-		printk(KERN_INFO "s3cfb_sysfs_store_mdnie_power() is called : mDNIE is OFF\n");
+		printk("s3cfb_sysfs_store_mdnie_power() is called : mDNIE is OFF\n");
 	}
 
 	return len;
@@ -357,7 +265,7 @@ void set_qos(void)
 	/* ioremap for LCD0 - M0 block */
 	qos_regs0 = ioremap(0x10410060, 0x10);
 	if (!qos_regs0) {
-		printk(KERN_ERR "%s: failed to remap io region\n", __func__);
+		printk("%s: failed to remap io region\n", __func__);
 		return;
 	}
 	writel(0x400003, qos_regs0 + 0x0);
@@ -369,7 +277,7 @@ void set_qos(void)
 	/* ioremap for LCD0 - M1 block */
 	qos_regs0 = ioremap(0x10400068, 0x10);
 	if (!qos_regs0) {
-		printk(KERN_ERR "%s: failed to remap io region\n", __func__);
+		printk("%s: failed to remap io region\n", __func__);
 		return;
 	}
 	writel(0x400003, qos_regs0 + 0x0);
@@ -381,7 +289,7 @@ void set_qos(void)
 	/* ioremap for LCD0 - M1 block */
 	qos_regs0 = ioremap(0x10410068, 0x10);
 	if (!qos_regs0) {
-		printk(KERN_ERR "%s: failed to remap io region\n", __func__);
+		printk("%s: failed to remap io region\n", __func__);
 		return;
 	}
 	writel(0x400003, qos_regs0 + 0x0);
@@ -393,7 +301,7 @@ void set_qos(void)
 	/* ioremap for Bus Tidemark */
 	qos_regs0 = ioremap(0x11600400, 0x10);
 	if (!qos_regs0) {
-		printk(KERN_ERR "%s: failed to remap io region\n", __func__);
+		printk("%s: failed to remap io region\n", __func__);
 		return;
 	}
 	writel(0x7, qos_regs0 + 0x0);
@@ -405,7 +313,7 @@ void set_qos(void)
 	/* ioremap for GDR */
 	qos_regs0 = ioremap(0x11200400, 0x10);
 	if (!qos_regs0) {
-		printk(KERN_ERR "%s: failed to remap io region\n", __func__);
+		printk("%s: failed to remap io region\n", __func__);
 		return;
 	}
 	writel(0x7, qos_regs0 + 0x0);
@@ -575,14 +483,6 @@ static int s3cfb_probe(struct platform_device *pdev)
 		pdata->backlight_on(pdev);
 #endif
 
-#ifdef CONFIG_FB_S3C_MIPI_LCD
-	ret = device_create_file(&(pdev->dev), &dev_attr_lcd_power);
-
-	ret = device_create_file(&(pdev->dev), &dev_attr_fimd_register);
-
-	ret = device_create_file(&(pdev->dev), &dev_attr_dsim_register);
-#endif
-
 	ret = device_create_file(&(pdev->dev), &dev_attr_win_power);
 	if (ret < 0)
 		dev_err(fbdev[0]->dev, "failed to add sysfs entries : win_power\n");
@@ -591,12 +491,6 @@ static int s3cfb_probe(struct platform_device *pdev)
 	ret = device_create_file(&(pdev->dev), &dev_attr_mdnie_power);
 	if (ret < 0)
 		dev_err(fbdev[0]->dev, "failed to add sysfs entries : mdnie_power\n");
-#endif
-
-#if defined(CONFIG_CPU_FREQ) && defined(CONFIG_S5PV310_BUSFREQ)
-#if defined(CONFIG_MACH_P8_REV00) || defined(CONFIG_MACH_P8_REV01) || defined(CONFIG_MACH_P8LTE_REV00)
-	atomic_set(&fbdev[0]->busfreq_lock_cnt, 0);
-#endif
 #endif
 
 	dev_info(fbdev[0]->dev, "registered successfully\n");
@@ -736,7 +630,7 @@ void s3cfb_lcd0_pmu_off(void)
 	s3cfb_lcd0_power_domain_stop();
 	msleep(5);
 	s3cfb_lcd0_power_domain_start();
-	printk(KERN_WARNING "lcd0 pmu re_start!!!\n");
+	printk("lcd0 pmu re_start!!!\n");
 }
 
 #ifdef CONFIG_PM
@@ -750,11 +644,11 @@ void s3cfb_early_suspend(struct early_suspend *h)
 	int i, ret;
 	u32 reg;
 
-	printk(KERN_INFO "+%s\n", __func__);
-
 #ifdef CONFIG_FB_S3C_S6E8AB0
 	s6e8ax0_early_suspend();
 #endif
+
+	printk("+%s\n", __func__);
 
 	for (i = 0; i < FIMD_MAX; i++) {
 		fbdev[i] = fbfimd->fbdev[i];
@@ -788,18 +682,15 @@ void s3cfb_early_suspend(struct early_suspend *h)
 		if (pdata->clk_off)
 			pdata->clk_off(pdev, &fbdev[i]->clock);
 	}
-
+	printk("-%s\n", __func__);
 #ifdef CONFIG_FB_S3C_MIPI_LCD
 	s5p_dsim_early_suspend();
 #endif
 #ifdef CONFIG_S5PV310_DEV_PD
 	/* disable the power domain */
 	printk(KERN_DEBUG "s3cfb - disable power domain\n");
-	pm_runtime_put_sync(&pdev->dev);
+	pm_runtime_put(&pdev->dev);
 #endif
-
-	printk(KERN_INFO "-%s\n", __func__);
-
 	return ;
 }
 
@@ -814,7 +705,7 @@ void s3cfb_late_resume(struct early_suspend *h)
 	struct platform_device *pdev = to_platform_device(info->dev);
 	u32 reg;
 
-	printk(KERN_INFO "+%s\n", __func__);
+	printk("+%s\n", __func__);
 
 	dev_dbg(info->dev, "wake up from suspend\n");
 
@@ -835,7 +726,7 @@ void s3cfb_late_resume(struct early_suspend *h)
 		msleep(10);
 		s5p_dsim_late_resume();
 		if (s5p_dsim_fifo_clear() == 0)
-			printk(KERN_ERR "dsim resume fail!!!\n");
+			printk("dsim resume fail!!!\n");
 	}
 
 	msleep(10);
@@ -905,16 +796,11 @@ void s3cfb_late_resume(struct early_suspend *h)
 			pdata->backlight_on(pdev);
 	}
 
+	printk("-%s\n", __func__);
+
 #ifdef CONFIG_FB_S3C_S6E8AB0
 	s6e8ax0_late_resume();
 #endif
-
-#ifdef CONFIG_FB_S3C_MIPI_LCD
-	s5p_dsim_frame_done_interrupt_mask_set();
-#endif
-
-	printk(KERN_INFO "-%s\n", __func__);
-
 	return;
 }
 #else /* else !CONFIG_HAS_EARLYSUSPEND */

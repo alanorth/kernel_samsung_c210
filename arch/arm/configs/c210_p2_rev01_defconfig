@@ -377,6 +377,9 @@ CONFIG_MACH_P2_REV01=y
 # CONFIG_MACH_P2_REV02 is not set
 # CONFIG_MACH_P8LTE_REV00 is not set
 
+CONFIG_IR_REMOCON=y
+CONFIG_IR_REMOCON_EUR=y
+
 #
 # MMC/SD slot setup
 #
@@ -866,7 +869,7 @@ CONFIG_RPS=y
 # CONFIG_NET_DROP_MONITOR is not set
 # CONFIG_HAMRADIO is not set
 # CONFIG_CAN is not set
-CONFIG_IRDA=y
+# CONFIG_IRDA is not set
 
 #
 # IrDA protocols

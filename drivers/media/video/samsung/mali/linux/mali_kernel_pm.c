@@ -345,6 +345,9 @@ static int mali_pm_suspend(struct device *dev)
 		return err;
 	}
 	mali_device_state = _MALI_DEVICE_SUSPEND_IN_PROGRESS;
+#if MALI_DVFS_ENABLED
+	mali_utilization_suspend();
+#endif
 	err = mali_device_suspend(MALI_PMM_EVENT_OS_POWER_DOWN, &pm_thread);
 	mali_device_state = _MALI_DEVICE_SUSPEND;
 #ifdef CONFIG_REGULATOR
@@ -528,9 +531,6 @@ static void mali_pm_early_suspend(struct early_suspend *mali_dev)
 			}
 #endif
 			_mali_osk_lock_wait(lock, _MALI_OSK_LOCKMODE_RW);
-#if MALI_DVFS_ENABLED
-			mali_utilization_suspend();
-#endif
 			if ((mali_device_state == _MALI_DEVICE_SUSPEND) || (mali_device_state == _MALI_DEVICE_EARLYSUSPEND_DISABLE_FB))
 			{
 				_mali_osk_lock_signal(lock, _MALI_OSK_LOCKMODE_RW);

@@ -113,6 +113,7 @@ static int try_to_freeze_tasks(bool sig_only)
 			       "(%d tasks refusing to freeze, wq_busy=%d):\n",
 			       elapsed_csecs / 100, elapsed_csecs % 100,
 			       todo - wq_busy, wq_busy);
+			show_state_filter(TASK_UNINTERRUPTIBLE);
 		}
 		thaw_workqueues();
 

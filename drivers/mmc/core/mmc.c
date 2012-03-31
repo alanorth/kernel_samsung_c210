@@ -169,6 +169,10 @@ static int mmc_decode_csd(struct mmc_card *card)
 		csd->erase_size <<= csd->write_blkbits - 9;
 	}
 
+	if (UNSTUFF_BITS(resp, 13, 1))
+		printk(KERN_ERR "%s: PERM_WRITE_PROTECT is set to 1.\n",
+				mmc_hostname(card->host));
+
 	return 0;
 }
 

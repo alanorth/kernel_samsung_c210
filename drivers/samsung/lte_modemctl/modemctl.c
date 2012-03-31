@@ -43,7 +43,6 @@ enum {
 
 /* FIXME: Don't use this except pm */
 extern struct usbsvn *share_svn;
-extern int lte_silent_reset_mode;
 
 int modemctl_shutdown_flag;
 
@@ -353,11 +352,8 @@ static ssize_t store_control(struct device *d,
 		kernel_upload(mc);
 
 	if (!strncmp(buf, "silent", 6)) {
-		if (lte_silent_reset_mode == 0) {
-			dev_err(mc->dev, "%s - LTE Silent Reset!!!\n",
-					__func__);
-			crash_event(1);
-		}
+		dev_err(mc->dev, "%s - LTE Silent Reset!!!\n", __func__);
+		crash_event(1);
 	}
 
 	if (!strncmp(buf, "dump", 4)) {
@@ -477,8 +473,6 @@ void crash_event(int type)
 		return;
 
 	pr_err("LTE Crash Event");
-
-	lte_silent_reset_mode = 1;
 
 	envs[0] = "MAILBOX=lte_reset";
 	kobject_uevent_env(&global_mc->dev->kobj, KOBJ_CHANGE, envs);

@@ -28,9 +28,6 @@
 #endif
 #endif
 #endif
-#ifdef CONFIG_CPU_FREQ
-#include <mach/cpufreq.h>
-#endif
 
 #define TTT		"s3cfb"
 
@@ -234,10 +231,6 @@ struct s3cfb_global {
 	struct early_suspend	early_suspend;
 	struct wake_lock	idle_lock;
 #endif
-#ifdef CONFIG_CPU_FREQ
-	atomic_t		busfreq_lock_cnt;	/* Bus frequency Lock count */
-	int			busfreq_flag;		/* context bus frequency flag*/
-#endif
 };
 
 #ifdef CONFIG_VCM
@@ -364,8 +357,6 @@ extern int s3cfb_disable_localpath(struct s3cfb_global *fbdev, int id);
 
 /* FIMD */
 extern int s3cfb_clear_interrupt(struct s3cfb_global *ctrl);
-extern int s3cfb_register_read(struct s3cfb_global *ctrl);
-extern int s3cfb_register_write(struct s3cfb_global *ctrl, int address, int value);
 extern int s3cfb_display_on(struct s3cfb_global *ctrl);
 extern int s3cfb_set_output(struct s3cfb_global *ctrl);
 extern int s3cfb_set_display_mode(struct s3cfb_global *ctrl);
@@ -415,15 +406,9 @@ extern void s3cfb_set_lcd_info(struct s3cfb_global *ctrl);
 extern void s5p_dsim_hs_toggle(void);
 extern void s5p_dsim_early_suspend(void);
 extern void s5p_dsim_late_resume(void);
-extern void s5p_dsim_register_read(void);
-extern void s5p_dsim_register_write(int addr, int value);
-extern int s5p_dsim_fifo_clear(void);
-extern void s5p_dsim_lcd_power(int power);
-extern void s5p_dsim_frame_done_interrupt_mask_set(void);
-#endif
-#ifdef CONFIG_FB_S3C_S6E8AB0
 extern void s6e8ax0_early_suspend(void);
 extern void s6e8ax0_late_resume(void);
+extern int s5p_dsim_fifo_clear(void);
 #endif
 
 #endif /* _S3CFB_H */

@@ -1352,13 +1352,8 @@ int mfc_init_encoding(struct mfc_inst_ctx *ctx, union mfc_args *args)
 #endif
 
 #if defined(CONFIG_CPU_FREQ) && defined(CONFIG_S5PV310_BUSFREQ)
-	if (ctx->width >= 1280 || ctx->height >= 720)
-		cpu_lock = 1;
-
-#if defined(CONFIG_MACH_P8_REV00) || defined(CONFIG_MACH_P8_REV01) || defined(CONFIG_MACH_P8LTE_REV00)
 	if (ctx->width >= 320 || ctx->height >= 240)
 		cpu_lock = 1;
-#endif
 
 	if (cpu_lock) {
 		if (atomic_read(&ctx->dev->cpufreq_lock_cnt) == 0) {

@@ -116,26 +116,6 @@ void usb_host_phy_power_off(void)
 	printk(KERN_DEBUG "ehci check ldo vcc_a(%d)\n", retval);
 }
 
-void s5pv210_usb_port0_power(int enable)
-{
-	struct usb_hcd *hcd = s5pv210_hcd;
-	struct ehci_hcd *ehci = hcd_to_ehci(hcd);
-	unsigned port;
-
-	if (!HCS_PPC (ehci->hcs_params))
-		return;
-
-	printk("[%s] usb port0 %s\n", __func__, enable ? "up" : "down");
-	(void) ehci_hub_control(ehci_to_hcd(ehci),
-			enable ? SetPortFeature : ClearPortFeature,
-			USB_PORT_FEAT_POWER,
-			1, NULL, 0);
-	/* Flush those writes */
-	ehci_readl(ehci, &ehci->regs->command);
-	msleep(20);
-}
-EXPORT_SYMBOL(s5pv210_usb_port0_power);
-
 #ifdef CONFIG_USBHUB_USB3503
 #define USB3503_PORT 2
 

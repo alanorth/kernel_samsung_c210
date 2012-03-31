@@ -1,6 +1,6 @@
 // MELFAS HEX to C converter v1.7 [2011.03.22]
 
-const UINT16 MELFAS_binary_nLength_1 = 0x7AA8;			// 30.7 KBytes ( 31400 Bytes )
+const UINT16 MELFAS_binary_nLength_1 = 0x7AA8;			// 30.7 KBytes ( 31400 Bytes ) 
 
 const  UINT8 MELFAS_binary_1[] = {
 

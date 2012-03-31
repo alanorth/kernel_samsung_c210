@@ -93,9 +93,11 @@ extern int mc_control_slave_wakeup(int val);
 extern int mc_is_slave_wakeup(void);
 #endif
 
+#ifdef AIRPLAIN_MODE_TEST
 extern int lte_airplain_mode;
+#endif
+
 extern int modemctl_shutdown_flag;
-extern int lte_silent_reset_mode;
 
 #ifdef CONFIG_HAS_WAKELOCK
 enum {
@@ -250,7 +252,6 @@ static void usbsvn_try_reconnect_work(struct work_struct *work)
 
 	if (svn->usbsvn_connected) {
 		wake_unlock_pm(svn);
-
 		printk(KERN_INFO "svn re-connected\n");
 		goto out;
 	}
@@ -580,9 +581,9 @@ static DEVICE_ATTR(tx_debug, 0664, usbsvn_tx_debug_show, usbsvn_tx_debug_store);
 static DEVICE_ATTR(connected, S_IRUGO | S_IRUSR, usbsvn_connection_show, NULL);
 static DEVICE_ATTR(waketime, S_IRUGO | S_IWUSR, show_waketime, store_waketime);
 #ifdef CONFIG_BRIDGE
-static DEVICE_ATTR(resume, 0664, NULL, usbsvn_bridge_resume_store);
-static DEVICE_ATTR(suspend, 0664, NULL, usbsvn_bridge_suspend_store);
-static DEVICE_ATTR(interfaceid, 0664, NULL, usbsvn_intf_id_store);
+static DEVICE_ATTR(resume, S_IRUGO | S_IWUGO, NULL, usbsvn_bridge_resume_store);
+static DEVICE_ATTR(suspend, S_IRUGO | S_IWUGO, NULL, usbsvn_bridge_suspend_store);
+static DEVICE_ATTR(interfaceid, S_IRUGO | S_IWUGO, NULL, usbsvn_intf_id_store);
 #endif
 
 static struct attribute *usbsvn_attrs[] = {
@@ -939,13 +940,13 @@ static void rx_complete(struct urb *req)
 
 	case -EPROTO:
 		dev_err(&dev->dev, "%s - Rx Protocol Error", __func__);
-		dev->stats.rx_errors++;
 		break;
 	}
 
+	dev->stats.rx_errors++;
+
 resubmit:
-	if (svn_rx)
-		kfree(svn_rx);
+	kfree(svn_rx);
 
 	if (page)
 		netdev_free_page(dev, page);
@@ -1268,13 +1269,24 @@ static void usbsvn_disconnect(struct usb_interface *intf)
 		cancel_delayed_work_sync(&svn->pm_runtime_work);
 		cancel_work_sync(&svn->post_resume_work);
 		if (!svn->driver_info) {
-			if (mc_is_modem_active() && lte_silent_reset_mode == 0 &&
-					lte_airplain_mode == 0 && modemctl_shutdown_flag == 0) {
+			/*TODO:check the Phone ACTIVE pin*/
+#if 0
+			if (mc_is_modem_active()) {
+				printk(KERN_INFO "%s try_reconnect_work\n", __func__);
+				svn->reconnect_cnt = 3;
+				schedule_delayed_work(&svn->try_reconnect_work,	10);
+			}
+#else
+#ifdef AIRPLAIN_MODE_TEST
+			if ((lte_airplain_mode == 0) && (modemctl_shutdown_flag == 0)) {
+#else
+			if (modemctl_shutdown_flag == 0) {
+#endif
 				printk(KERN_INFO "%s try_reconnect_work\n", __func__);
 				svn->reconnect_cnt = 5;
 				schedule_delayed_work(&svn->try_reconnect_work,	50);
 			}
-
+#endif
 			wake_unlock_pm(svn);
 		}
 	}

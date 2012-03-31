@@ -12,10 +12,10 @@
 #include <linux/errno.h>
 #include <linux/fs.h>
 #include <linux/ctype.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 
 #include "s3cfb.h"
-#include "mdnie.h"
+#include "s3cfb_mdnie.h"
 
 static unsigned short mdnie_data[100];
 
@@ -75,10 +75,10 @@ int mdnie_txtbuf_to_parsing(char const *pFilepath)
 	fs = get_fs();
 	set_fs(get_ds());
 
-	printk(KERN_INFO "%s:", pFilepath);
+	printk("%s:", pFilepath);
 
 	if (!pFilepath) {
-		printk(KERN_ERR "Error : mdnie_txtbuf_to_parsing has invalid filepath.\n");
+		printk("Error : mdnie_txtbuf_to_parsing has invalid filepath.\n");
 		goto parse_err;
 	}
 
@@ -111,7 +111,7 @@ int mdnie_txtbuf_to_parsing(char const *pFilepath)
 	set_fs(fs);
 	num = parse_text(dp, l);
 	if (!num) {
-		printk(KERN_ERR "Nothing to parse!\n");
+		printk("Nothing to parse!\n");
 		kfree(dp);
 		goto parse_err;
 	}

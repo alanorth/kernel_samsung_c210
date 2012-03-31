@@ -120,5 +120,5 @@ obj-$(CONFIG_GIB)		+= gib/
 obj-$(CONFIG_VIBETONZ)	        += samsung/
 obj-$(CONFIG_SAMSUNG_LTE)       += samsung/
 obj-$(CONFIG_SAMSUNG_PHONE_SVNET) += svnet/
-obj-$(CONFIG_IRDA)				+= irda/
+obj-$(CONFIG_IRDA)        += irda/
 obj-$(CONFIG_ACCESSORY)		+= accessory/

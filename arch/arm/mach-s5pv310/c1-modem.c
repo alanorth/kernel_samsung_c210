@@ -222,8 +222,6 @@ static void xmm6260_on(struct modemctl *mc)
 	udelay(160);
 
 	gpio_set_value(mc->gpio_phone_on, 1);
-	udelay(60);
-	gpio_set_value(mc->gpio_phone_on, 0);
 
 	msleep(20);
 	xmm6260_reverse_bias_gpio_restore(mc);
@@ -250,8 +248,8 @@ static void xmm6260_reset(struct modemctl *mc)
 		return;
 
 /*	gpio_set_value(mc->gpio_pda_active, 0);
-	gpio_set_value(mc->gpio_active_state, 0);*/
-	gpio_set_value(mc->gpio_cp_reset, 0);
+	gpio_set_value(mc->gpio_active_state, 0);
+	gpio_set_value(mc->gpio_cp_reset, 0); */
 	gpio_set_value(mc->gpio_cp_req_reset, 0);
 
 	msleep(100);

@@ -486,8 +486,8 @@ struct s5k5ccgx_state {
 	struct s5k5ccgx_framesize *capture;     /* Used */
 	struct s5k5ccgx_focus focus;		/* Used */
 	struct s5k5ccgx_exif exif;		/* Used */
-	u32 req_fps;				/* Used */
-	u32 fps;				/* Used */
+	s32 req_fps;				/* Used */
+	s32 fps;				/* Used */
 /*	s32 preview_index;
 	s32 capture_index; */
 	int sensor_version;

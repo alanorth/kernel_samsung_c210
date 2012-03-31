@@ -72,11 +72,10 @@ int mc_control_active_state(int val)
 	if (!global_mc)
 		return -EFAULT;
 
-	/* if (mc_is_modem_on()) { */
-	gpio_set_value(global_mc->gpio_active_state, val ? 1 : 0);
-	dev_dbg(global_mc->dev, "ACTIVE_STATE:%d\n", val ? 1 : 0);
-	/* } */
-
+	if (mc_is_modem_on()) {
+		gpio_set_value(global_mc->gpio_active_state, val ? 1 : 0);
+		dev_dbg(global_mc->dev, "ACTIVE_STATE:%d\n", val ? 1 : 0);
+	}
 	return 0;
 }
 EXPORT_SYMBOL_GPL(mc_control_active_state);
@@ -443,30 +442,11 @@ static ssize_t store_crash_info(struct device *dev,
 	return count;
 }
 
-static ssize_t show_sim_status(struct device *d,
-		struct device_attribute *attr, char *buf)
-{
-	struct modemctl *mc = dev_get_drvdata(d);
-	int count = 0;
-	int status;
-
-	if (!mc->gpio_sim_detect)
-		return -ENXIO;
-
-	status = gpio_get_value(mc->gpio_sim_detect) ? 0 : 1;
-	pr_info("svn sim status = %d\n", status);
-
-	count += sprintf(buf + count, "%d\n", status);
-
-	return count;
-}
-
 static DEVICE_ATTR(control, 0664, show_control, store_control);
 static DEVICE_ATTR(status, S_IRUGO, show_status, NULL);
 static DEVICE_ATTR(wakeup, 0664, show_wakeup, store_wakeup);
 static DEVICE_ATTR(debug, S_IRUGO, show_debug, NULL);
 static DEVICE_ATTR(cr_info, 0664, NULL, store_crash_info);
-static DEVICE_ATTR(sim_status, S_IRUGO, show_sim_status, NULL);
 
 static struct attribute *modemctl_attributes[] = {
 	&dev_attr_control.attr,
@@ -474,9 +454,6 @@ static struct attribute *modemctl_attributes[] = {
 	&dev_attr_wakeup.attr,
 	&dev_attr_debug.attr,
 	&dev_attr_cr_info.attr,
-#ifdef CONFIG_SUPPORT_SIMDETECT
-	&dev_attr_sim_status.attr,
-#endif
 	NULL
 };
 

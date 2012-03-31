@@ -90,15 +90,6 @@ struct sr200pc20_exif {
 	u32 shutter_speed;
 };
 
-struct sr200pc20_stream_time {
-	struct timeval curr_time;
-	struct timeval before_time;
-};
-
-#define GET_ELAPSED_TIME(cur, before) \
-		(((cur).tv_sec - (before).tv_sec) * USEC_PER_SEC \
-		+ ((cur).tv_usec - (before).tv_usec))
-
 typedef struct regs_array_type {
 	u16 subaddr;
 	u16 value;
@@ -180,17 +171,14 @@ struct sr200pc20_state {
 	struct sr200pc20_framesize preview_frmsizes;
 	struct sr200pc20_framesize capture_frmsizes;
 	struct sr200pc20_exif exif;
-	struct sr200pc20_stream_time stream_time;
-	const struct sr200pc20_regs *regs;
-	struct mutex ctrl_lock;
 
 	enum v4l2_sensor_mode sensor_mode;
 	s32 vt_mode;
+	s32 check_dataline;
 	u32 req_fps;
 	u32 set_fps;
-	u32 check_dataline:1;
-	u32 need_wait_streamoff:1;
-	u32 initialized:1;
+	u32 initialized;
+	const struct sr200pc20_regs *regs;
 };
 
 static inline struct sr200pc20_state *to_state(struct v4l2_subdev *sd) {
@@ -203,10 +191,7 @@ static inline void debug_msleep(u32 msecs)
 	msleep(msecs);
 }
 
-/*********** Sensor specific ************/
 #define DELAY_SEQ               0xFF
-#define SR200PC20_CHIP_ID	0x92
-
 
 #ifdef CONFIG_LOAD_FILE
 #include <linux/vmalloc.h>

@@ -314,14 +314,10 @@ enum {
 
 #ifdef CONFIG_MACH_P8LTE_REV00
 #define SEC_CURR_MEA_ADC_CH  6
-/*N.B. For a given battery type and aboard type both R_ISET and I_topOff
-are constant hence VtopOff = R_ISET * I_topOff should also be a constant
-under the given condns.
-Presently only implementing for P8-LTE, for other, consult with HW.
-For P8-LTE the limit is defined as 0.05C , where C is the battery capacity
-,5100mAh in this case.*/
-#define COUNT_TOP_OFF   3
-#define V_TOP_OFF   208 /* 250mA(default value) * 750ohms.(11_10_10) */
+// N.B. For a given battery type and aboard type both R_ISET and I_topOff are constant
+// hence VtopOff = R_ISET * I_topOff should also be a constant under the given condns.
+// Presently only implementing for P8-LTE, for other, consult with HW.
+#define V_TOP_OFF   250 // 300mA(default value) * 750ohms.(11_10_10)
 #endif
 
 /* Temperature adjust value */

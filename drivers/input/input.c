@@ -246,8 +246,7 @@ static void input_handle_event(struct input_dev *dev,
 				if (dev->name != NULL &&
 					 (!strcmp(dev->name, "sec_key")
 					 || !strcmp(dev->name, "sec_keyboard")))
-					printk(KERN_DEBUG "[%s] %s\n",
-						dev->name, value ? "P" : "R");
+					printk(KERN_DEBUG "[%s] %s\n", dev->name, value ? "P" : "R");
 #endif
 
 			if (value != 2) {
@@ -1509,6 +1508,15 @@ static int input_dev_resume(struct device *dev)
 
 	mutex_lock(&input_dev->mutex);
 	input_dev_reset(input_dev, true);
+
+	/*
+	 * Keys that have been pressed at suspend time are unlikely
+	 * to be still pressed when we resume.
+	 */
+	spin_lock_irq(&input_dev->event_lock);
+	input_dev_release_keys(input_dev);
+	spin_unlock_irq(&input_dev->event_lock);
+
 	mutex_unlock(&input_dev->mutex);
 
 	return 0;

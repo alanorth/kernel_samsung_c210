@@ -21,7 +21,6 @@
 #include <linux/ctype.h>
 #include <linux/genhd.h>
 #include <linux/blktrace_api.h>
-#include <linux/vmalloc.h>
 
 #include "check.h"
 
@@ -163,16 +162,8 @@ check_partition(struct gendisk *hd, struct block_device *bdev)
 	int i, res, err;
 
 	state = kzalloc(sizeof(struct parsed_partitions), GFP_KERNEL);
-	if (!state) {
-		state = (struct parsed_partitions *)
-			vmalloc(sizeof(struct parsed_partitions));
-		if (!state)
-			return NULL;
-		memset(state, 0, sizeof(struct parsed_partitions));
-		state->is_kzalloc = false;
-	} else
-		state->is_kzalloc = true;
-
+	if (!state)
+		return NULL;
 	state->pp_buf = (char *)__get_free_page(GFP_KERNEL);
 	if (!state->pp_buf) {
 		kfree(state);
@@ -219,11 +210,7 @@ check_partition(struct gendisk *hd, struct block_device *bdev)
 	printk(KERN_INFO "%s", state->pp_buf);
 
 	free_page((unsigned long)state->pp_buf);
-	if (state->is_kzalloc)
-		kfree(state);
-	else
-		vfree(state);
-
+	kfree(state);
 	return ERR_PTR(res);
 }
 
@@ -615,11 +602,7 @@ int rescan_partitions(struct gendisk *disk, struct block_device *bdev)
 	int p, highest, res;
 rescan:
 	if (state && !IS_ERR(state)) {
-		if (state->is_kzalloc)
-			kfree(state);
-		else
-			vfree(state);
-
+		kfree(state);
 		state = NULL;
 	}
 
@@ -729,11 +712,7 @@ rescan:
 			md_autodetect_dev(part_to_dev(part)->devt);
 #endif
 	}
-	if (state->is_kzalloc)
-		kfree(state);
-	else
-		vfree(state);
-
+	kfree(state);
 	return 0;
 }
 

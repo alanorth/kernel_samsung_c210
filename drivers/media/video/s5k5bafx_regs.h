@@ -880,17 +880,17 @@ static const u32 s5k5bafx_common[] = {
 	0x0F120001,
 
 	/* Apply preview config */
-	/* 0x002A021C, */
-	/* 0x0F120000, */
-	/* 0x002A0220, */
-	/* 0x0F120001, */
-	/* 0x002A01F8, */
-	/* 0x0F120001, */
-	/* 0x002A021E, */
-	/* 0x0F120001, */
-	/* 0x002A01F0, */
-	/* 0x0F120001, */
-	/* 0x0F120001, */
+	0x002A021C,
+	0x0F120000,
+	0x002A0220,
+	0x0F120001,
+	0x002A01F8,
+	0x0F120001,
+	0x002A021E,
+	0x0F120001,
+	0x002A01F0,
+	0x0F120001,
+	0x0F120001,
 
 	/* Capture Config 0 (1600x1200 fixed 8fps) */
 	0x002A0302,
@@ -3422,17 +3422,17 @@ static const u32 s5k5bafx_vt_common[] =
 	0x0F120001,
 	
 	/* Apply preview config */
-	/* 0x002A021C, */
-	/* 0x0F120000, */
-	/* 0x002A0220, */
-	/* 0x0F120001, */
-	/* 0x002A01F8, */
-	/* 0x0F120001, */
-	/* 0x002A021E, */
-	/* 0x0F120001, */
-	/* 0x002A01F0, */
-	/* 0x0F120001, */
-	/* 0x0F120001, */
+	0x002A021C,
+	0x0F120000,
+	0x002A0220,
+	0x0F120001,
+	0x002A01F8,
+	0x0F120001,
+	0x002A021E,
+	0x0F120001,
+	0x002A01F0,
+	0x0F120001,
+	0x0F120001,
 	
 	/* Set Capture Config */
 	/* Capture Config 0 (1600x1200 fixed 8fps) */
@@ -5977,17 +5977,17 @@ static const u32 s5k5bafx_vt_wifi_common[] =
 	0x0F120001,
 	
 	/* Apply preview config */
-	/* 0x002A021C, */
-	/* 0x0F120000, */
-	/* 0x002A0220, */
-	/* 0x0F120001, */
-	/* 0x002A01F8, */
-	/* 0x0F120001, */
-	/* 0x002A021E, */
-	/* 0x0F120001, */
-	/* 0x002A01F0, */
-	/* 0x0F120001, */
-	/* 0x0F120001, */
+	0x002A021C,
+	0x0F120000,
+	0x002A0220,
+	0x0F120001,
+	0x002A01F8,
+	0x0F120001,
+	0x002A021E,
+	0x0F120001,
+	0x002A01F0,
+	0x0F120001,
+	0x0F120001,
 	
 	/* Set Capture Config */
 	/* Capture Config 0 (1600x1200 fixed 15fps) */
@@ -8593,17 +8593,17 @@ static const u32 s5k5bafx_recording_60Hz_common[] = {
 	0x0F120001,
 	
 	/* Apply preview config */
-	/* 0x002A021C, */
-	/* 0x0F120000, */ /* REG_TC_GP_ActivePrevConfig */
-	/* 0x002A0220, */
-	/* 0x0F120001, */ /* REG_TC_GP_PrevOpenAfterChange */
-	/* 0x002A01F8, */
-	/* 0x0F120001, */ /* REG_TC_GP_NewConfigSync */
-	/* 0x002A021E, */
-	/* 0x0F120001, */ /* REG_TC_GP_PrevConfigChanged */
-	/* 0x002A01F0, */
-	/* 0x0F120001, */ /* REG_TC_GP_EnablePreview */
-	/* 0x0F120001, */ /* REG_TC_GP_EnablePreviewChanged */
+	0x002A021C,
+	0x0F120000, /* REG_TC_GP_ActivePrevConfig */
+	0x002A0220,
+	0x0F120001, /* REG_TC_GP_PrevOpenAfterChange */
+	0x002A01F8,
+	0x0F120001, /* REG_TC_GP_NewConfigSync */
+	0x002A021E,
+	0x0F120001, /* REG_TC_GP_PrevConfigChanged */
+	0x002A01F0,
+	0x0F120001, /* REG_TC_GP_EnablePreview */
+	0x0F120001, /* REG_TC_GP_EnablePreviewChanged */
 	
 	
 	
@@ -11152,17 +11152,18 @@ static const u32 s5k5bafx_recording_50Hz_common[] = {
 	0x0F120001, /* REG_TC_OIF_CfgChanged  */
 	
 	/* Apply preview config */
-	/* 0x002A021C, */
-	/* 0x0F120000, */ /* REG_TC_GP_ActivePrevConfig */
-	/* 0x002A0220, */
-	/* 0x0F120001, */ /* REG_TC_GP_PrevOpenAfterChange */
-	/* 0x002A01F8, */
-	/* 0x0F120001, */ /* REG_TC_GP_NewConfigSync */
-	/* 0x002A021E, */
-	/* 0x0F120001, */ /* REG_TC_GP_PrevConfigChanged */
-	/* 0x002A01F0, */
-	/* 0x0F120001, */ /* REG_TC_GP_EnablePreview */
-	/* 0x0F120001, */ /* REG_TC_GP_EnablePreviewChanged */
+	0x002A021C,
+	0x0F120000, /* REG_TC_GP_ActivePrevConfig */
+	0x002A0220,
+	0x0F120001, /* REG_TC_GP_PrevOpenAfterChange */
+	0x002A01F8,
+	0x0F120001, /* REG_TC_GP_NewConfigSync */
+	0x002A021E,
+	0x0F120001, /* REG_TC_GP_PrevConfigChanged */
+	0x002A01F0,
+	0x0F120001, /* REG_TC_GP_EnablePreview */
+	0x0F120001, /* REG_TC_GP_EnablePreviewChanged */
+	
 	
 	
 	/* Set Capture Config */

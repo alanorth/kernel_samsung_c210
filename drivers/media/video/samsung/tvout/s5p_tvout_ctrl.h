@@ -92,6 +92,8 @@ extern void s5p_hdmi_ctrl_set_hdcp(bool en);
 extern int s5p_hpd_set_hdmiint(void);
 extern int s5p_hpd_set_eint(void);
 
+extern void s5p_hdmi_ctrl_set_audio(bool en);
+
 /****************************************
  * for VP control class
  ***************************************/

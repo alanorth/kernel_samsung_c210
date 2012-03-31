@@ -171,8 +171,6 @@ struct sr200pc20_state {
 	struct sr200pc20_framesize preview_frmsizes;
 	struct sr200pc20_framesize capture_frmsizes;
 	struct sr200pc20_exif exif;
-	const struct sr200pc20_regs *regs;
-	struct mutex ctrl_lock;
 
 	enum v4l2_sensor_mode sensor_mode;
 	s32 vt_mode;
@@ -180,6 +178,7 @@ struct sr200pc20_state {
 	u32 req_fps;
 	u32 set_fps;
 	u32 initialized;
+	const struct sr200pc20_regs *regs;
 };
 
 static inline struct sr200pc20_state *to_state(struct v4l2_subdev *sd) {
@@ -192,10 +191,7 @@ static inline void debug_msleep(u32 msecs)
 	msleep(msecs);
 }
 
-/*********** Sensor specific ************/
 #define DELAY_SEQ               0xFF
-#define SR200PC20_CHIP_ID	0x92
-
 
 #ifdef CONFIG_LOAD_FILE
 #include <linux/vmalloc.h>

@@ -19,7 +19,6 @@ struct parsed_partitions {
 	int next;
 	int limit;
 	bool access_beyond_eod;
-	bool is_kzalloc;
 	char *pp_buf;
 };
 

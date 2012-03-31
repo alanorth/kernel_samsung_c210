@@ -54,19 +54,14 @@
 #define G2W_HW_BASE_VER		0x32
 #define G2W_SW_BASE_VER		0x01
 
-#ifdef CONFIG_TOUCHSCREEN_P2_NTT
 #define GFS_HW_VER		0x03
-#define GFS_SW_VER		0x09
-#else
-#define GFS_HW_VER		0x03
-#define GFS_SW_VER		0x08
-#endif
+#define GFS_SW_VER		0x14
 
 #define G2M_HW_VER		0x12
 #define G2M_SW_VER		0x09
 
 #define GFD_HW_VER		0x26
-#define GFD_SW_VER		0x04
+#define GFD_SW_VER		0x07
 
 #define G2W_HW_VER		0x32
 #define G2W_SW_VER		0x01
@@ -74,17 +69,15 @@
 // ISC mode ver
 #define CORE_VER			0x20
 
-#ifdef CONFIG_TOUCHSCREEN_P2_NTT
-#define GFS_PRIVATE_VER		0x01
-#define GFS_PUBLIC_VER		0x02
-#else
-#define GFS_PRIVATE_VER		0x00
-#define GFS_PUBLIC_VER		0x01
-#endif
+#define GFS_PRIVATE_VER		0x07
+#define GFS_PUBLIC_VER		0x08
+
 #define G2M_PRIVATE_VER		0x00
 #define G2M_PUBLIC_VER		0x01
-#define GFD_PRIVATE_VER		0x00
-#define GFD_PUBLIC_VER		0x01
+
+#define GFD_PRIVATE_VER		0x04
+#define GFD_PUBLIC_VER		0x05
+
 #define G2W_PRIVATE_VER		0x00
 #define G2W_PUBLIC_VER		0x01
 
@@ -117,7 +110,7 @@
 
 #define I2C_RETRY_CNT			50
 #define P2_MAX_I2C_FAIL			50
-#define P2_MAX_FW_READ_FAIL		3
+#define P2_MAX_INFO_READ_FAIL	3
 
 #define	SET_DOWNLOAD_BY_GPIO	1
 
@@ -780,25 +773,31 @@ static int firmware_update(struct melfas_ts_data *ts)
 #if SET_DOWNLOAD_BY_GPIO
 
 	msleep(200);
-	ret = check_tsp_connect(ts,&tsp_connect_stat);
-	if(ret){
+
+	for (i = 0 ; i < P2_MAX_INFO_READ_FAIL ; i++) {
+		ret = check_tsp_connect(ts, &tsp_connect_stat);
+		if (!ret)
+			break;
+		msleep(100);
+	}
+	if (i == P2_MAX_INFO_READ_FAIL) {
 		pr_err("[TSP] check_tsp_connect check fail! [%d]",ret);
 		fw_isp_update |= true;
 	}
-	pr_info("[TSP] TSP panel is %sconnected ",
-				tsp_connect_stat ? "" : "dis");
+	pr_info("[TSP] TSP panel is %sconnected [%d]",
+				tsp_connect_stat ? "" : "dis", i);
 
 	if (touch_id == 3) {
 		return 0;
 	}
 
-	for(i=0 ; i < P2_MAX_FW_READ_FAIL ; i++){
+	for (i = 0 ; i < P2_MAX_INFO_READ_FAIL ; i++) {
 		ret = check_detail_firmware(ts,fw_ver);
 		if(!ret)
 			break;
 	}
 
-	if(i == P2_MAX_FW_READ_FAIL){
+	if (i == P2_MAX_INFO_READ_FAIL) {
 		pr_err("[TSP] check_firmware fail! [%d]",ret);
 		fw_isp_update |= true;
 	}else{
@@ -951,23 +950,23 @@ static void inform_charger_connection(struct tsp_callbacks *_cb, int mode)
 	struct melfas_ts_data *ts = container_of(_cb,
 			struct melfas_ts_data, cb);
 	char buf[2];
-	int ret =0;
-	u8 write_buf[2];
-
 	buf[0] = TS_TA_STAT_ADDR;
 	buf[1] = !!mode;
-	ts->charging_status = !!mode;
 
-	pr_info("[TSP] inform_charger_connection : TSP %s & TA %sconnect ",
-				ts->tsp_status?"ON":"OFF",ts->charging_status?"":"dis");
+	if (ts->charging_status == !!mode) {
+		pr_info("[TSP] %s call but not change status", __func__);
+	} else {
+		ts->charging_status = !!mode;
 
-	if(ts->tsp_status){
-		melfas_i2c_write(ts->client, (char *)buf, 2);
-		msleep(150);
-	}else{
-		pr_info("[TSP] TSP Off & inform_charger_connection call");
+		pr_info("[TSP] inform_charger_connection : TSP %s & TA %sconnect ",
+					ts->tsp_status ? "ON" : "OFF",
+					ts->charging_status ? "" : "dis");
+
+		if (ts->tsp_status) {
+			melfas_i2c_write(ts->client, (char *)buf, 2);
+			msleep(150);
+		}
 	}
-
 }
 
 
@@ -1156,14 +1155,15 @@ static ssize_t show_firm_version_panel(struct device *dev,
 				       char *buf)
 {
 	struct melfas_ts_data *ts = dev_get_drvdata(dev);
-	u8 fw_ver[2]={0,};
+	u8 fw_ver[6] = {0,};
 	int ret;
 
-	ret = check_firmware(ts,fw_ver);
+	ret = check_detail_firmware(ts, fw_ver);
 	if(ret)
 		pr_err("[TSP] show_firm_version_panel fail! [%d]",ret);
 	else
-		pr_info("[TSP] show_firm_version_panel : HW Ver.= %x,FW Ver.= %x\n", fw_ver[0], fw_ver[1]);
+		pr_info("[TSP] show_firm_version_panel [%x][%x],[%x][%x][%x]",
+					fw_ver[0], fw_ver[1], fw_ver[3], fw_ver[4], fw_ver[5]);
 
 	if(ts->touch_id == 0)
 		return snprintf(buf, PAGE_SIZE,	"GFS_%2.2Xx%2.2X\n", fw_ver[0], fw_ver[1]);
@@ -1226,8 +1226,8 @@ static ssize_t tsp_firm_update(struct device *dev,
 			       size_t count)
 {
 	struct melfas_ts_data *ts = dev_get_drvdata(dev);
-	u8 fw_ver[6]={0,};
-	int ret=0,i;
+	u8 fw_ver[6] = {0,};
+	int ret = 0, i;
 
 	disable_irq(ts->client->irq);
 
@@ -1235,10 +1235,22 @@ static ssize_t tsp_firm_update(struct device *dev,
 
 	ts->set_touch_i2c_to_gpio();
 
-	pr_info("[TSP] ADB F/W UPDATE MODE ENTER!");
+	pr_info("[TSP] ADB F/W UPDATE MODE ENTER! :%s", buf);
 	if (*buf == 'F')
 		ret = mcsdl_download_binary_data(ts->touch_id);
-	else
+	else if (*buf == '0') {
+		pr_info("[TSP] GFS F/W UPDATE !");
+		ret = mcsdl_download_binary_data(0);
+	} else if (*buf == '1') {
+		pr_info("[TSP] G2M F/W UPDATE !");
+		ret = mcsdl_download_binary_data(1);
+	} else if (*buf == '2') {
+		pr_info("[TSP] GFD F/W UPDATE !");
+		ret = mcsdl_download_binary_data(2);
+	} else if (*buf == '3') {
+		pr_info("[TSP] G2W F/W UPDATE !");
+		ret = mcsdl_download_binary_data(3);
+	} else
 		ret = mcsdl_download_binary_file();
 
 	pr_info("[TSP] ADB F/W UPDATE MODE FROM %s END! %s",
@@ -1262,6 +1274,49 @@ static ssize_t tsp_firm_update(struct device *dev,
 
 	return count;
 }
+
+static ssize_t tsp_firm_verify(struct device *dev,
+			       struct device_attribute *attr,
+			       const char *buf,
+			       size_t count)
+{
+	struct melfas_ts_data *ts = dev_get_drvdata(dev);
+	u8 fw_ver[6] = {0,};
+	int ret = 0, i;
+
+	disable_irq(ts->client->irq);
+
+	ts->set_touch_i2c_to_gpio();
+
+	pr_info("[TSP] ADB F/W Verify MODE ENTER! :%s", buf);
+	if (*buf == 'F')
+		ret = mcsdl_download_binary_data_verify(ts->touch_id);
+	else if (*buf == '0') {
+		pr_info("[TSP] GFS F/W Verify !");
+		ret = mcsdl_download_binary_data_verify(0);
+	} else if (*buf == '1') {
+		pr_info("[TSP] G2M F/W Verify !");
+		ret = mcsdl_download_binary_data_verify(1);
+	} else if (*buf == '2') {
+		pr_info("[TSP] GFD F/W Verify !");
+		ret = mcsdl_download_binary_data_verify(2);
+	} else if (*buf == '3') {
+		pr_info("[TSP] G2W F/W Verify !");
+		ret = mcsdl_download_binary_data_verify(3);
+	} else
+		pr_info("[TSP] ADB F/W Verify MODE file error");
+
+	pr_info("[TSP] ADB F/W Verify %s", (ret ? "Fail" : "Success"));
+
+	ts->set_touch_i2c();
+
+	reset_tsp(ts);
+
+	enable_irq(ts->client->irq);
+
+	return count;
+}
+
 
 static ssize_t store_debug_mode(struct device *dev,
 						struct device_attribute *attr,
@@ -1301,6 +1356,8 @@ static ssize_t store_debug_log(struct device *dev,
 	else
 		debug_print = false;
 
+	pr_info("[TSP] debug log %s", i ? "ON" : "OFF");
+
 	return count;
 }
 
@@ -1318,6 +1375,7 @@ static ssize_t show_threshold(struct device *dev,
 
 static DEVICE_ATTR(tsp_threshold, S_IRUGO, show_threshold, NULL);
 static DEVICE_ATTR(tsp_firm_update, S_IWUSR | S_IWGRP, NULL, tsp_firm_update);		/* firmware update */
+static DEVICE_ATTR(tsp_firm_verify, S_IWUSR | S_IWGRP, NULL, tsp_firm_verify);
 static DEVICE_ATTR(tsp_firm_update_status, S_IRUGO, show_firm_update_status, NULL);	/* firmware update status return */
 static DEVICE_ATTR(tsp_firm_version_phone, S_IRUGO, show_firm_version_phone, NULL);/* PHONE*/	/* firmware version resturn in phone driver version */
 static DEVICE_ATTR(tsp_firm_version_panel, S_IRUGO, show_firm_version_panel, NULL);/*PART*/	/* firmware version resturn in TSP panel version */
@@ -1333,9 +1391,9 @@ static DEVICE_ATTR(threshold, S_IRUGO, show_threshold, NULL);
 
 #ifdef TSP_FACTORY_TEST
 static u16 index_reference;
+static u16 reference_data[X_LINE*Y_LINE] = { 0, };
+static u16 intensity_data[X_LINE*Y_LINE] = { 0, };
 static u16 inspection_data[X_LINE*Y_LINE] = { 0, };
-static u16 lntensity_data[X_LINE*Y_LINE] = { 0, };
-static u16 low_data[X_LINE*Y_LINE] = { 0, };
 
 static int check_debug_data(struct melfas_ts_data *ts)
 {
@@ -1382,25 +1440,11 @@ static int check_debug_data(struct melfas_ts_data *ts)
 			write_buffer[3] = sensing_line;
 			melfas_i2c_write(ts->client, (char *)write_buffer, 6);
 			melfas_i2c_read(ts->client, 0xA8, 2, read_buffer);
-			inspection_data[exciting_line + sensing_line * Y_LINE] =
+			reference_data[exciting_line + sensing_line * Y_LINE] =
 				(read_buffer[1] & 0xf) << 8 | read_buffer[0];
 		}
 	}
-#ifdef DEBUG_LOW_DATA
-	if (debug_print)
-		pr_info("[TSP] read low data\n");
-	write_buffer[5] = 0x03;
-	for (sensing_line = 0; sensing_line < X_LINE; sensing_line++) {
-		for (exciting_line =0; exciting_line < Y_LINE; exciting_line++) {
-			write_buffer[2] = exciting_line;
-			write_buffer[3] = sensing_line;
-			melfas_i2c_write(ts->client, (char *)write_buffer, 6);
-			melfas_i2c_read(ts->client, 0xA8, 2, read_buffer);
-			low_data[exciting_line + sensing_line * Y_LINE] =
-				(read_buffer[1] & 0xf) << 8 | read_buffer[0];
-		}
-	}
-#endif
+
 	reset_tsp(ts);
 	msleep(200);
 	enable_irq(ts->client->irq);
@@ -1430,15 +1474,15 @@ static ssize_t all_refer_show(struct device *dev,
 	if (!status) {
 		for (i = 0; i < X_LINE*Y_LINE; i++) {
 			/* out of range */
-			if (inspection_data[i] < 30) {
-				status = 1;
+			if (reference_data[i] < 30) {
+				status |= 1;
 				break;
 			}
 
 			if (debug_print) {
-				if (0 == i % X_LINE)
-					pr_info("[TSP]\n");
-				pr_info("[TSP] %5u  ", inspection_data[i]);
+				if (0 == i % Y_LINE)
+					printk("\n");
+				printk("%5u ", reference_data[i]);
 			}
 		}
 	} else {
@@ -1447,14 +1491,6 @@ static ssize_t all_refer_show(struct device *dev,
 		return sprintf(buf, "%u\n", status);
 	}
 
-#ifdef DEBUG_LOW_DATA
-	pr_info("[TSP] low data\n");
-	for (i = 0; i < X_LINE*Y_LINE; i++) {
-		if (0 == i % X_LINE)
-			pr_info("[TSP] \n");
-		pr_info("[TSP] %5u  ", low_data[i]);
-	}
-#endif
 	pr_info("[TSP] all_refer_show func [%d]", status);
 	return sprintf(buf, "%u\n", status);
 }
@@ -1468,7 +1504,7 @@ static void check_intesity_data(struct melfas_ts_data *ts)
 	int gpio = ts->pdata->gpio_int;
 
 
-	if (0 == inspection_data[0]) {
+	if (0 == reference_data[0]) {
 		disable_irq(ts->client->irq);
 
 		/* enter the debug mode */
@@ -1499,7 +1535,7 @@ static void check_intesity_data(struct melfas_ts_data *ts)
 				write_buffer[3] = sensing_line;
 				melfas_i2c_write(ts->client, (char *)write_buffer, 6);
 				melfas_i2c_read(ts->client, 0xA8, 2, read_buffer);
-				inspection_data[exciting_line + sensing_line * Y_LINE] =
+				reference_data[exciting_line + sensing_line * Y_LINE] =
 					(read_buffer[1] & 0xf) << 8 | read_buffer[0];
 			}
 		}
@@ -1522,31 +1558,11 @@ static void check_intesity_data(struct melfas_ts_data *ts)
 			write_buffer[3] = sensing_line;
 			melfas_i2c_write(ts->client, (char *)write_buffer, 6);
 			melfas_i2c_read(ts->client, 0xA8, 2, read_buffer);
-			lntensity_data[exciting_line + sensing_line * Y_LINE] =
+			intensity_data[exciting_line + sensing_line * Y_LINE] =
 				(read_buffer[1] & 0xf) << 8 | read_buffer[0];
 		}
 	}
 	enable_irq(ts->client->irq);
-#if 0
-	pr_info("[TSP] Find MAX lntensity data Point");
-	int i;
-	int max_val = 0;
-	int max_i = 0;
-
-	for (i = X_LINE*Y_LINE-1 ; i > 0 ; i--) {
-		if (0 == i % Y_LINE)
-			printk("\n");
-		printk("%3u  ", lntensity_data[i]);
-
-		if(max_val < lntensity_data[i])
-		{
-			max_val = lntensity_data[i];
-			max_i = i;
-		}
-	}
-	pr_info("MAX intensity  max_i=[%d],max_val=[%d]",max_i,max_val);
-
-#endif
 }
 
 static ssize_t set_refer0_mode_show(struct device *dev,
@@ -1558,7 +1574,7 @@ static ssize_t set_refer0_mode_show(struct device *dev,
 
 	check_intesity_data(ts);
 
-	refrence = inspection_data[95];
+	refrence = reference_data[95];
 	return sprintf(buf, "%u\n", refrence);
 }
 
@@ -1567,7 +1583,7 @@ static ssize_t set_refer1_mode_show(struct device *dev,
 				    char *buf)
 {
 	u16 refrence = 0;
-	refrence = inspection_data[529];
+	refrence = reference_data[529];
 	return sprintf(buf, "%u\n", refrence);
 }
 
@@ -1576,7 +1592,7 @@ static ssize_t set_refer2_mode_show(struct device *dev,
 				    char *buf)
 {
 	u16 refrence = 0;
-	refrence = inspection_data[294];
+	refrence = reference_data[294];
 	return sprintf(buf, "%u\n", refrence);
 }
 
@@ -1585,7 +1601,7 @@ static ssize_t set_refer3_mode_show(struct device *dev,
 				    char *buf)
 {
 	u16 refrence = 0;
-	refrence = inspection_data[89];
+	refrence = reference_data[89];
 	return sprintf(buf, "%u\n", refrence);
 }
 
@@ -1594,7 +1610,7 @@ static ssize_t set_refer4_mode_show(struct device *dev,
 				    char *buf)
 {
 	u16 refrence = 0;
-	refrence = inspection_data[554];
+	refrence = reference_data[554];
 	return sprintf(buf, "%u\n", refrence);
 }
 
@@ -1603,7 +1619,7 @@ static ssize_t set_intensity0_mode_show(struct device *dev,
 					char *buf)
 {
 	u16 intensity = 0;
-	intensity = lntensity_data[95];
+	intensity = intensity_data[95];
 	return sprintf(buf, "%u\n", intensity);
 }
 
@@ -1612,7 +1628,7 @@ static ssize_t set_intensity1_mode_show(struct device *dev,
 					char *buf)
 {
 	u16 intensity = 0;
-	intensity = lntensity_data[529];
+	intensity = intensity_data[529];
 	return sprintf(buf, "%u\n", intensity);
 }
 
@@ -1621,7 +1637,7 @@ static ssize_t set_intensity2_mode_show(struct device *dev,
 					char *buf)
 {
 	u16 intensity = 0;
-	intensity = lntensity_data[294];
+	intensity = intensity_data[294];
 	return sprintf(buf, "%u\n", intensity);
 }
 
@@ -1630,7 +1646,7 @@ static ssize_t set_intensity3_mode_show(struct device *dev,
 					char *buf)
 {
 	u16 intensity = 0;
-	intensity = lntensity_data[89];
+	intensity = intensity_data[89];
 	return sprintf(buf, "%u\n", intensity);
 }
 
@@ -1639,7 +1655,7 @@ static ssize_t set_intensity4_mode_show(struct device *dev,
 					char *buf)
 {
 	u16 intensity = 0;
-	intensity = lntensity_data[554];
+	intensity = intensity_data[554];
 	return sprintf(buf, "%u\n", intensity);
 }
 
@@ -1663,6 +1679,7 @@ static ssize_t tsp_power_control(struct device *dev,
 		release_all_fingers(ts);
 		ts->power_off();
 		msleep(200);
+		return count;
 	}else if(*buf == '1' && ts->tsp_status == false){
 		ts->power_on();
 		msleep(200);
@@ -1672,7 +1689,7 @@ static ssize_t tsp_power_control(struct device *dev,
 		return count;
 	}else{
 		pr_info("[TSP]tsp_power_control bad command!");
-		return -EINVAL;
+		return count;
 	}
 }
 
@@ -1757,7 +1774,7 @@ static ssize_t set_debug_data1(struct device *dev,
 			write_buffer[3] = sensing_line;
 			melfas_i2c_write(ts->client, (char *)write_buffer, 6);
 			melfas_i2c_read(ts->client, 0xA8, 2, read_buffer);
-			inspection_data[exciting_line + sensing_line * Y_LINE] =
+			reference_data[exciting_line + sensing_line * Y_LINE] =
 				(read_buffer[1] & 0xf) << 8 | read_buffer[0];
 		}
 	}
@@ -1814,7 +1831,7 @@ static ssize_t set_debug_data2(struct device *dev,
 			write_buffer[3] = sensing_line;
 			melfas_i2c_write(ts->client, (char *)write_buffer, 6);
 			melfas_i2c_read(ts->client, 0xA8, 2, read_buffer);
-			low_data[exciting_line + sensing_line * Y_LINE] =
+			inspection_data[exciting_line + sensing_line * Y_LINE] =
 				(read_buffer[1] & 0xf) << 8 | read_buffer[0];
 		}
 	}
@@ -1842,6 +1859,8 @@ static ssize_t set_debug_data3(struct device *dev,
 	int sensing_line, exciting_line;
 	int gpio = ts->pdata->gpio_int;
 
+	pr_info("[TSP] read lntensity data\n");
+
 	disable_irq(ts->client->irq);
 
 	/* enter the debug mode */
@@ -1850,19 +1869,6 @@ static ssize_t set_debug_data3(struct device *dev,
 	write_buffer[2] = 0x0;
 	write_buffer[3] = 0x0;
 	write_buffer[4] = 0x0;
-	write_buffer[5] = 0x01;
-	melfas_i2c_write(ts->client, (char *)write_buffer, 6);
-
-	/* wating for the interrupt*/
-	while (gpio_get_value(gpio)) {
-		printk(".");
-		udelay(100);
-	}
-
-	/* read the dummy data */
-	melfas_i2c_read(ts->client, 0xA8, 2, read_buffer);
-
-	pr_info("[TSP] read lntensity data\n");
 	write_buffer[5] = 0x04;
 	for (sensing_line = 0; sensing_line < X_LINE; sensing_line++) {
 		for (exciting_line =0; exciting_line < Y_LINE; exciting_line++) {
@@ -1870,7 +1876,7 @@ static ssize_t set_debug_data3(struct device *dev,
 			write_buffer[3] = sensing_line;
 			melfas_i2c_write(ts->client, (char *)write_buffer, 6);
 			melfas_i2c_read(ts->client, 0xA8, 2, read_buffer);
-			lntensity_data[exciting_line + sensing_line * Y_LINE] =
+			intensity_data[exciting_line + sensing_line * Y_LINE] =
 				(read_buffer[1] & 0xf) << 8 | read_buffer[0];
 		}
 	}
@@ -1901,19 +1907,48 @@ static ssize_t show_reference_info(struct device *dev,
 					struct device_attribute *attr,
 					char *buf)
 {
-	return sprintf(buf, "%d\n", inspection_data[index_reference]);
+	int i = 0;
+	if (debug_print) {
+		for (i = 0; i < X_LINE*Y_LINE; i++) {
+			if (0 == i % Y_LINE)
+				printk("\n");
+			printk("%4u", reference_data[i]);
+		}
+	}
+	return sprintf(buf, "%d\n", reference_data[index_reference]);
 }
 static ssize_t show_inspection_info(struct device *dev,
 					struct device_attribute *attr,
 					char *buf)
 {
-	return sprintf(buf, "%d\n", low_data[index_reference]);
+	int i = 0;
+	if (debug_print) {
+		for (i = 0; i < X_LINE*Y_LINE; i++) {
+			if (0 == i % Y_LINE)
+				printk("\n");
+			printk("%5u", inspection_data[i]);
+		}
+	}
+	return sprintf(buf, "%d\n", inspection_data[index_reference]);
 }
 static ssize_t show_intensity_info(struct device *dev,
 					struct device_attribute *attr,
 					char *buf)
 {
-	return sprintf(buf, "%d\n", lntensity_data[index_reference]);
+	int i = 0, max_idx = 0, max_val = 0;
+	if (debug_print) {
+		for (i = 0; i < X_LINE*Y_LINE; i++) {
+			if (max_val < intensity_data[i]) {
+				max_val = intensity_data[i];
+				max_idx = i;
+			}
+			if (0 == i % Y_LINE)
+				printk("\n");
+			printk("%4u", intensity_data[i]);
+		}
+		pr_info("[TSP] max val=[%d] , index=[%d] ", max_val, max_idx);
+	}
+	return sprintf(buf, "%d\n", intensity_data[index_reference]);
 }
 
 
@@ -1947,6 +1982,7 @@ static DEVICE_ATTR(show_intensity_info, S_IRUGO, show_intensity_info, NULL);
 static struct attribute *sec_touch_attributes[] = {
 	&dev_attr_tsp_threshold.attr,
 	&dev_attr_tsp_firm_update.attr,
+	&dev_attr_tsp_firm_verify.attr,
 	&dev_attr_tsp_firm_update_status.attr,
 	&dev_attr_tsp_firm_version_phone.attr,
 	&dev_attr_tsp_firm_version_panel.attr,

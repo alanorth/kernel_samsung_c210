@@ -14,8 +14,7 @@ static const unsigned char SEQ_APPLY_LEVEL_2_KEY[] = {
 };
 
 static const unsigned char SEQ_SLEEP_OUT[] = {
-	0x11,
-	0x00, 0x00
+	0x11
 };
 
 static const unsigned char SEQ_APPLY_MTP_KEY[] = {
@@ -37,13 +36,11 @@ static const unsigned char SEQ_DISPLAY_CONDITION_SET[] = {
 };
 
 static const unsigned char SEQ_GAMMA_SELECT[] = {
-	0x26, 0x01,
-	0x00
+	0x26, 0x01
 };
 
 static const unsigned char SEQ_GAMMA_UPDATE[] = {
-	0xF7, 0x03,
-	0x00
+	0xF7, 0x01
 };
 
 static const unsigned char SEQ_ETC_PWRCTL[] = {
@@ -70,7 +67,7 @@ static const unsigned char SEQ_ETC_NVM_SETTING[] = {
 
 static const unsigned char SEQ_GLOBAL_PARAM[] = {
 	0xB0,
-	0x03, 0x00
+	0x03
 };
 
 static unsigned char SEQ_VREGOUT_SET[] = {
@@ -80,18 +77,15 @@ static unsigned char SEQ_VREGOUT_SET[] = {
 };
 
 static const unsigned char SEQ_DISPLAY_ON[] = {
-	0x29,
-	0x00, 0x00
+	0x29
 };
 
 static const unsigned char SEQ_DISPLAY_OFF[] = {
-	0x28,
-	0x00, 0x00
+	0x28
 };
 
 static const unsigned char SEQ_STANDBY_ON[] = {
-	0x10,
-	0x00, 0x00
+	0x10
 };
 
 enum {
@@ -139,12 +133,10 @@ enum {
 
 const unsigned char SEQ_ACL_ON[] = {
 	0xC0, 0x01,
-	0x00
 };
 
 const unsigned char SEQ_ACL_OFF[] = {
 	0xC0, 0x00,
-	0x00
 };
 
 const unsigned char SEQ_ACL_CUTOFF_40[] = {
@@ -152,9 +144,9 @@ const unsigned char SEQ_ACL_CUTOFF_40[] = {
 	0x4D, 0x96, 0x1D, 0x00, 0x00,
 	0x04, 0xFF, 0x00, 0x00, 0x03,
 	0x1F, 0x00, 0x00, 0x00, 0x00,
-	0x00, 0x00, 0x00, 0x21, 0x37,
-	0x37, 0x37, 0x37, 0x37, 0x37,
-	0x37, 0x37, 0x1D, 0x4D, 0x96
+	0x00, 0x01, 0x06, 0x0C, 0x11,
+	0x16, 0x1C, 0x21, 0x26, 0x2B,
+	0x31, 0x36, 0x1D, 0x4D, 0x96,
 };
 
 const unsigned char *ACL_CUTOFF_TABLE[ACL_STATUS_MAX] = {

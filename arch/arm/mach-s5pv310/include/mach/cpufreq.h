@@ -39,7 +39,6 @@ enum cpufreq_lock_ID{
 	DVFS_LOCK_ID_TSP,	/* TSP */
 	DVFS_LOCK_ID_TMU,	/* TMU */
 	DVFS_LOCK_ID_IR_LED,	/* IR_LED */
-	DVFS_LOCK_ID_LCD,	/* LCD */
 	DVFS_LOCK_ID_END,
 };
 

@@ -60,6 +60,39 @@ unsigned int suspend_status;
 static void s5p_tvout_early_suspend(struct early_suspend *h);
 static void s5p_tvout_late_resume(struct early_suspend *h);
 #endif
+int hdmi_audio_ext;
+
+/* To provide an interface fo Audio path control */
+static ssize_t hdmi_set_audio_read(struct device *dev,
+			struct device_attribute *attr, char *buf)
+{
+	int count = 0;
+
+	printk(KERN_ERR "[HDMI]: AUDIO PATH\n");
+	return count;
+}
+
+static ssize_t hdmi_set_audio_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t size)
+{
+	char *after;
+	unsigned long value = !strncmp(buf, "1", 1) ? true : false;
+
+	printk(KERN_ERR "[HDMI] Change AUDIO PATH: %ld\n", value);
+
+	if (value) {
+		s5p_hdmi_ctrl_set_audio(1);
+		hdmi_audio_ext = 0;
+	} else {
+		s5p_hdmi_ctrl_set_audio(0);
+		hdmi_audio_ext = 1;
+	}
+
+	return size;
+}
+
+static DEVICE_ATTR(hdmi_audio_set_ext, 0660,
+				hdmi_set_audio_read, hdmi_set_audio_store);
 
 static int __devinit s5p_tvout_clk_get(struct platform_device *pdev,
 					struct s5p_tvout_status *ctrl)
@@ -82,7 +115,7 @@ static int __devinit s5p_tvout_clk_get(struct platform_device *pdev,
 	TV_CLK_GET_WITH_ERR_CHECK(fout_vpll,		pdev, "fout_vpll");
 	TV_CLK_GET_WITH_ERR_CHECK(mout_vpll,		pdev, "sclk_vpll");
 
-/*	
+/*
  *	if (clk_set_rate(fout_vpll, 54000000) < 0)
  *		return -1;
 */
@@ -128,6 +161,9 @@ static int __devinit s5p_tvout_probe(struct platform_device *pdev)
 	unsigned int vp_buff_phy_addr;
 	int i;
 
+	struct class *hdmi_audio_class;
+	struct device *hdmi_audio_dev;
+
 	s5p_tvout_pm_runtime_enable(&pdev->dev);
 
 #if defined(CONFIG_S5P_SYSMMU_TV) && defined(CONFIG_VCM)
@@ -138,7 +174,7 @@ static int __devinit s5p_tvout_probe(struct platform_device *pdev)
 		goto err;
 #elif defined(CONFIG_S5P_SYSMMU_TV) && defined(CONFIG_S5P_VMEM)
 	sysmmu_on(SYSMMU_TV);
-	printk("sysmmu on\n");
+	printk(KERN_ERR, "sysmmu on\n");
 	sysmmu_set_tablebase_pgd(SYSMMU_TV, __pa(swapper_pg_dir));
 #endif
 	if (s5p_tvout_clk_get(pdev, &s5ptv_status) < 0)
@@ -218,7 +254,7 @@ static int __devinit s5p_tvout_probe(struct platform_device *pdev)
 	tvout_dbg("s5ptv_vp_buff phy_base = 0x%x\n", vp_buff_phy_addr);
 
 	vp_buff_vir_addr = phys_to_virt(vp_buff_phy_addr);
-	tvout_dbg( "s5ptv_vp_buff vir_base = 0x%x\n", vp_buff_vir_addr);
+	tvout_dbg("s5ptv_vp_buff vir_base = 0x%x\n", vp_buff_vir_addr);
 
 	if (!vp_buff_vir_addr) {
 		tvout_err("io remap failed\n");
@@ -230,11 +266,24 @@ static int __devinit s5p_tvout_probe(struct platform_device *pdev)
 		s5ptv_vp_buff.vp_buffs[i].vir_base = vp_buff_vir_addr + (i * S5PTV_VP_BUFF_SIZE);
 	}
 
-	for (i = 0; i < S5PTV_VP_BUFF_CNT -1; i++)
+	for (i = 0; i < S5PTV_VP_BUFF_CNT - 1; i++)
 		s5ptv_vp_buff.copy_buff_idxs[i] = i;
 
 	s5ptv_vp_buff.curr_copy_idx = 0;
 	s5ptv_vp_buff.vp_access_buff_idx = S5PTV_VP_BUFF_CNT - 1;
+
+	hdmi_audio_class = class_create(THIS_MODULE, "hdmi_audio");
+	if (IS_ERR(hdmi_audio_class))
+		pr_err("Failed to create class(hdmi_audio)!\n");
+	hdmi_audio_dev = device_create(hdmi_audio_class, NULL, 0, NULL,
+								"hdmi_audio");
+	if (IS_ERR(hdmi_audio_dev))
+		pr_err("Failed to create device(hdmi_audio_dev)!\n");
+
+	if (device_create_file(hdmi_audio_dev,
+					&dev_attr_hdmi_audio_set_ext) < 0)
+		printk(KERN_ERR "Failed to create device file(%s)!\n",
+					dev_attr_hdmi_audio_set_ext.attr.name);
 
 	return 0;
 

@@ -1348,7 +1348,7 @@ void s5p_hdmi_reg_audio_enable(u8 en)
 	mod = readb(hdmi_base + S5P_HDMI_MODE_SEL);
 
 	if (en) {
-		if (mod & S5P_HDMI_DVI_MODE_EN)
+		if ((mod & S5P_HDMI_DVI_MODE_EN) || hdmi_audio_ext)
 			return;
 
 		con |= S5P_HDMI_ASP_EN;

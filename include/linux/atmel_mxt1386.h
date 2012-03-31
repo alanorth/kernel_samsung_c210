@@ -24,6 +24,7 @@
 
 /*For Performance*/
 #define MXT_FACTORY_TEST
+#define ENABLE_NOISE_TEST_MODE
 
 /*Normal Feature*/
 #define MXT_SLEEP_POWEROFF
@@ -32,14 +33,19 @@
 #define MXT_I2C_APP_ADDR   0x4c
 #define MXT_I2C_BOOTLOADER_ADDR 0x26
 
+/*
+#define	MAXTOUCH_I2C_ADDR_LOW				0x4A
+#define	MAXTOUCH_I2C_ADDR_HIGH				0x4B
+#define	MAXTOUCH_I2C_ADDR				MAXTOUCH_I2C_ADDR_HIGH
+*/
+
+#if defined(ENABLE_NOISE_TEST_MODE)
 /*botton_right, botton_left, center, top_right, top_left*/
-#define MXT1386_MAX_CHANNEL	1386
-#define MXT1386_PAGE_SIZE		64
-#define MXT1386_PAGE_SIZE_SLAVE		8
-#define MXT1386_MAX_PAGE	((MXT1386_PAGE_SIZE_SLAVE * 3) - 1)
-#define MXT1386_PAGE_WIDTH			14
-#define MXT1386_MIN_REF_VALUE	4840
-#define MXT1386_MAX_REF_VALUE	13500
+static const u16 test_node[5] = {324, 45, 700, 1355, 1075};
+#define MAX_CHANNEL 1386
+#define MIN_REF_VALUE 4840
+#define MAX_REF_VALUE 13500
+#endif
 
 #define MXT_I2C_SPEED_KHZ  400
 #define MXT_I2C_MAX_LENGTH 300
@@ -698,8 +704,6 @@ struct mxt_platform_data {
 	uint8_t tch_blen_for_fherr;
 	uint8_t tchthr_for_fherr;
 	uint8_t noisethr_for_fherr;
-	uint8_t movefilter_for_fherr;
-	uint8_t idleacqint_for_fherr;
 	uint8_t freq_for_fherr1[5];
 	uint8_t freq_for_fherr2[5];
 	uint8_t freq_for_fherr3[5];
@@ -760,10 +764,6 @@ struct mxt_data {
 	u32  configuration_crc;
 	spinlock_t lock;
 	wait_queue_head_t msg_queue;
-	/* for the factory test */
-	u32 index;
-	s16 delta_data[MXT1386_MAX_CHANNEL];
-	u16 ref_data[MXT1386_MAX_CHANNEL];
 };
 
 /* Returns the start address of object in mXT memory. */

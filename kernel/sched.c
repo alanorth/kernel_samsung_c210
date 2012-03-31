@@ -3701,10 +3701,6 @@ static noinline void __schedule_bug(struct task_struct *prev)
 	printk(KERN_ERR "BUG: scheduling while atomic: %s/%d/0x%08x\n",
 		prev->comm, prev->pid, preempt_count());
 
-	/* this is BUG at some samsung device */
-	if (prev->pid == 0)
-		preempt_count() = 1;
-
 	debug_show_held_locks(prev);
 	print_modules();
 	if (irqs_disabled())

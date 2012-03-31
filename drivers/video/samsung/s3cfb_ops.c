@@ -139,43 +139,12 @@ int fb_is_primary_device(struct fb_info *fb)
 }
 #endif
 
-void s3cfb_busfreq_lock(struct s3cfb_global *fbdev, unsigned int lock)
-{
-	if (lock) {
-		if (atomic_read(&fbdev->busfreq_lock_cnt) == 0) {
-			s5pv310_busfreq_lock(DVFS_LOCK_ID_LCD, BUS_L1);
-			dev_info(fbdev->dev, "[%s] Bus Freq Locked L1\n", __func__);
-		}
-		atomic_inc(&fbdev->busfreq_lock_cnt);
-		fbdev->busfreq_flag = true;
-	} else {
-		if (fbdev->busfreq_flag == true) {
-			atomic_dec(&fbdev->busfreq_lock_cnt);
-			fbdev->busfreq_flag = false;
-			if (atomic_read(&fbdev->busfreq_lock_cnt) == 0) {
-				/* release Freq lock back to normal */
-				s5pv310_busfreq_lock_free(DVFS_LOCK_ID_LCD);
-				dev_info(fbdev->dev, "[%s] Bus Freq lock Released Normal !!\n", __func__);
-			}
-		}
-	}
-}
-
 int s3cfb_enable_window(struct s3cfb_global *fbdev, int id)
 {
 	struct s3cfb_window *win = fbdev->fb[id]->par;
-	int enabled_win = 0;
 
 	if (!win->enabled)
 		atomic_inc(&fbdev->enabled_win);
-
-#if defined(CONFIG_CPU_FREQ) && defined(CONFIG_S5PV310_BUSFREQ)
-#if defined(CONFIG_MACH_P8_REV00) || defined(CONFIG_MACH_P8_REV01) || defined(CONFIG_MACH_P8LTE_REV00)
-	enabled_win = atomic_read(&fbdev->enabled_win);
-	if (enabled_win >= 2)
-		s3cfb_busfreq_lock(fbdev, 1);
-#endif
-#endif
 
 	if (s3cfb_window_on(fbdev, id)) {
 		win->enabled = 0;
@@ -189,7 +158,6 @@ int s3cfb_enable_window(struct s3cfb_global *fbdev, int id)
 int s3cfb_disable_window(struct s3cfb_global *fbdev, int id)
 {
 	struct s3cfb_window *win = fbdev->fb[id]->par;
-	int enabled_win = 0;
 
 	if (win->enabled)
 		atomic_dec(&fbdev->enabled_win);
@@ -198,13 +166,6 @@ int s3cfb_disable_window(struct s3cfb_global *fbdev, int id)
 		win->enabled = 1;
 		return -EFAULT;
 	} else {
-#if defined(CONFIG_CPU_FREQ) && defined(CONFIG_S5PV310_BUSFREQ)
-#if defined(CONFIG_MACH_P8_REV00) || defined(CONFIG_MACH_P8_REV01) || defined(CONFIG_MACH_P8LTE_REV00)
-		enabled_win = atomic_read(&fbdev->enabled_win);
-		if (enabled_win < 2)
-			s3cfb_busfreq_lock(fbdev, 0);
-#endif
-#endif
 		win->enabled = 0;
 		return 0;
 	}

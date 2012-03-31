@@ -30,13 +30,11 @@ struct s5k5ccgx_platform_data {
 	u32 freq;	/* MCLK in Hz */
 
 	/* This SoC supports Parallel & CSI-2 */
-	u32 is_mipi;		/* set to 1 if mipi */
-	s32 streamoff_delay;	/* ms, type is signed */
+	u32 is_mipi;	/* set to 1 if mipi */
+	u32 streamoff_delay;	/* ms */
 
 	/* ISP interrupt */
 	/* int (*config_isp_irq)(void);*/
-
-	#define S5K5CCGX_SUPPORT_FLASH
 	int (*flash_en)(u32 mode, u32 onoff);
 	int (*is_flash_on)(void);
 };

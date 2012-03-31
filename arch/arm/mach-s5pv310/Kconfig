@@ -526,4 +526,10 @@ config FREQ_STEP_UP_L2_L0
 	 ("Frequecy 3-step up: Other->L2->L1->L0 for CPU Freq")
 endmenu
 
+config MACH_P2_GER
+	tristate "P2 GER model"
+	default n
+	help
+	 Say Y here to P2 GER support
+
 endif

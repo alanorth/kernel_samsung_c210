@@ -24,10 +24,6 @@
 #include <mach/sec_debug.h>
 #include <asm/mach/map.h>
 
-#if defined(CONFIG_SAMSUNG_PHONE_DPRAM_INTERNAL_MODULE)
-#include <linux/miscdevice.h>
-#endif
-
 enum sec_debug_upload_cause_t {
 	UPLOAD_CAUSE_INIT = 0xCAFEBABE,
 	UPLOAD_CAUSE_KERNEL_PANIC = 0x000000C8,
@@ -409,63 +405,6 @@ static inline void sec_debug_disable_watchdog(void)
 }
 #endif
 
-#if defined(CONFIG_SAMSUNG_PHONE_DPRAM_INTERNAL_MODULE)
-static void __iomem *idpram_base;
-void sec_set_cp_upload(void)
-{
-	unsigned int send_mail, wait_count;
-	volatile u16 *cp_dpram_mbx_BA;/*send mail box*/
-	volatile u16 *cp_dpram_mbx_AB;/*receive mail box*/
-
-	cp_dpram_mbx_BA = (volatile u16 *)(idpram_base + 0x3FFC);
-	cp_dpram_mbx_AB = (volatile u16 *)(idpram_base + 0x3FFE);
-
-	send_mail = 0xc9; /*KERNEL_SEC_DUMP_AP_DEAD_INDICATOR_DPRAM*/
-
-	*cp_dpram_mbx_BA = send_mail;
-
-	pr_err("%s : set cp upload mode, MailboxBA 0x%x\n",
-		__func__, send_mail);
-
-	wait_count = 0;
-	while (1) {
-		if (*cp_dpram_mbx_AB == 0xc6) {
-			pr_err("%s  - Done.\n", __func__);
-			break;
-		}
-		mdelay(10);
-		if (++wait_count > 2500) {
-			pr_err("%s - Fail to set CP uploadmode.\n", __func__);
-			break;
-		}
-	}
-	pr_err("%s : modem_wait_count : %d\n", __func__, wait_count);
-}
-
-static struct miscdevice sec_cp_upload_dev = {
-	.minor = MISC_DYNAMIC_MINOR,
-	.name = "cp_upload",
-};
-static __init int sec_cp_upload_init(void)
-{
-	/*DPRAM_START_ADDRESS_PHYS + DPRAM_SHARED_BANK_SIZE*/
-	idpram_base = ioremap_nocache(0x13A00000, 0x4000);
-
-	if (idpram_base == NULL)
-		printk(KERN_ERR "%s : failed ioremap\n", __func__);
-
-	return misc_register(&sec_cp_upload_dev);
-}
-
-static __exit void sec_cp_upload_exit(void)
-{
-	misc_deregister(&sec_cp_upload_dev);
-}
-
-module_init(sec_cp_upload_init);
-module_exit(sec_cp_upload_exit);
-#endif
-
 static int sec_debug_panic_handler(struct notifier_block *nb,
 				   unsigned long l, void *buf)
 {
@@ -494,11 +433,6 @@ static int sec_debug_panic_handler(struct notifier_block *nb,
 	handle_sysrq('t');
 
 	sec_debug_dump_stack();
-
-#if defined(CONFIG_SAMSUNG_PHONE_DPRAM_INTERNAL_MODULE)
-	sec_set_cp_upload();
-#endif
-
 	sec_debug_hw_reset();
 
 	return 0;

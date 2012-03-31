@@ -20,8 +20,6 @@
 #include <linux/if_ether.h>
 #endif
 
-extern int lte_silent_reset_mode;
-
 static LIST_HEAD(pdp_device_list);
 
 static int pdp_open(struct net_device *ndev)
@@ -282,9 +280,6 @@ static ssize_t pdp_activate_store(struct device *dev,
 	}
 
 	dev_info(dev, "pdp channel %ld activated\n", ch);
-
-	if (lte_silent_reset_mode == 1)
-		lte_silent_reset_mode = 0;
 
 	return count;
 }

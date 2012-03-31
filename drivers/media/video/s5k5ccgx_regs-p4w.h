@@ -6848,7 +6848,7 @@ static const u32 s5k5ccgx_camcorder_set[] = {
 
 };
 
-static const u32 s5k5ccgx_update_preview_reg[] = {
+static const u32 s5k5ccgx_update_preview_setting[] = {
 	//PREVIEW
 	0x002A0208,
 	0x0F120000, //REG_TC_GP_ActivePrevConfig
@@ -6867,35 +6867,6 @@ static const u32 s5k5ccgx_update_preview_reg[] = {
 	0x0F120001, //REG_TC_GP_EnableCaptureChanged
 	0xFFFF0064, //Delay 100ms
 };
-
-static const u32 s5k5ccgx_update_hd_preview_reg[] = {
-	/* PREVIEW */
-	0x002A0208,
-	0x0F120000, /* REG_TC_GP_ActivePrevConfig */
-	0x002A0210,
-	0x0F120000, /* REG_TC_GP_ActiveCapConfig */
-	0x002A020C,
-	0x0F120001, /* REG_TC_GP_PrevOpenAfterChange */
-	0x002A01F4,
-	0x0F120001, /* REG_TC_GP_NewConfigSync */
-	0x002A020A,
-	0x0F120001, /* REG_TC_GP_PrevConfigChanged */
-	0x002A0212,
-	0x0F120001, /* REG_TC_GP_CapConfigChanged */
-	0x002A01E8,
-	0x0F120000, /* REG_TC_GP_EnableCapture */
-	0x0F120001, /* REG_TC_GP_EnableCaptureChanged */
-
-	/* TNP_Regs_bUseAccurateFR */
-	0x00287000,
-	0x002A3FE4,
-	0x0F120001, /* on/off TNP_Regs_bAccuDynamicFR */
-	0x0F1234A2, /* on/off TNP_Regs_usMinAccuDynamicFrTme */
-	0x0F1240FD, /* on/off TNP_Regs_usMaxAccuDynamicFrTme */
-
-	0xFFFF0064, /* Delay 100ms */
-};
-
 
 static const u32 s5k5ccgx_stream_stop_reg[] = {
 	0xFCFCD000,
@@ -10429,7 +10400,8 @@ static const u32 s5k5ccgx_1280_1024_Preview[] = {
 	0x0F120280,
 };
 
-static const u32 s5k5ccgx_hd_init_reg[] = {
+#define S5K5CCGX_720P_INIT_REG s5k5ccgx_1280_720_Preview
+static const u32 s5k5ccgx_1280_720_Preview[] = {
 	//****************************************/
 	0xFCFCD000,
 	//****************************************/
@@ -11968,7 +11940,8 @@ static const u32 s5k5ccgx_hd_init_reg[] = {
 	// AF Scene Settings
 	0x002A151E,
 	0x0F120003, //#af_scene_usSaturatedScene
-
+	0x002A0648,
+	0x0F120000, //skl_af_bPregmOff gamma
 
 
 	//7. AF Lens Position Table Settings
@@ -11979,7 +11952,7 @@ static const u32 s5k5ccgx_hd_init_reg[] = {
 	0x0F120034, //#af_pos_usTable_1_  51
 	0x0F120038, //#af_pos_usTable_2_  54
 	0x0F12003C, //#af_pos_usTable_3_  57
-	0x0F120040, /* #af_pos_usTable_4_ 61 */
+	0x0F120030, //#af_pos_usTable_4_  61
 	0x0F120044, //#af_pos_usTable_5_  65
 	0x0F120048, //#af_pos_usTable_6_  69
 	0x0F12004C, //#af_pos_usTable_7_  73
@@ -12290,24 +12263,24 @@ static const u32 s5k5ccgx_hd_init_reg[] = {
 
 
 
-	/* PREVIEW */
-	/* 0x002A0208, */
-	/* 0x0F120000, */ /* REG_TC_GP_ActivePrevConfig */
-	/* 0x002A0210, */
-	/* 0x0F120000, */ /* REG_TC_GP_ActiveCapConfig */
-	/* 0x002A020C, */
-	/* 0x0F120001, */ /* REG_TC_GP_PrevOpenAfterChange */
-	/* 0x002A01F4, */
-	/* 0x0F120001, */ /* REG_TC_GP_NewConfigSync */
-	/* 0x002A020A, */
-	/* 0x0F120001, */ /* REG_TC_GP_PrevConfigChanged */
-	/* 0x002A0212 ,*/
-	/* 0x0F120001, */ /* REG_TC_GP_CapConfigChanged */
-	/* 0x002A01E8, */
-	/* 0x0F120000, */ /* REG_TC_GP_EnableCapture */
-	/* 0x0F120001, */ /* REG_TC_GP_EnableCaptureChanged */
+	//PREVIEW
+	0x002A0208,
+	0x0F120000, //REG_TC_GP_ActivePrevConfig
+	0x002A0210,
+	0x0F120000, //REG_TC_GP_ActiveCapConfig
+	0x002A020C,
+	0x0F120001, //REG_TC_GP_PrevOpenAfterChange
+	0x002A01F4,
+	0x0F120001, //REG_TC_GP_NewConfigSync
+	0x002A020A,
+	0x0F120001, //REG_TC_GP_PrevConfigChanged
+	0x002A0212,
+	0x0F120001, //REG_TC_GP_CapConfigChanged
+	0x002A01E8,
+	0x0F120000, //REG_TC_GP_EnableCapture
+	0x0F120001, //REG_TC_GP_EnableCaptureChanged
 
-	/* 0xFFFF0064, */ /* Delay 100ms */
+	0xFFFF0064, //Delay 100ms
 
 	//===================================================================
 	// AFC
@@ -13961,12 +13934,12 @@ static const u32 s5k5ccgx_hd_init_reg[] = {
 	0x0f120800, //analog filter update Green
 
 
-	/* TNP_Regs_bUseAccurateFR */
-	/* 0x00287000, */
-	/* 0x002A3FE4, */
-	/* 0x0F120001, */ /* on/off TNP_Regs_bAccuDynamicFR */
-	/* 0x0F1234A2, */ /* on/off TNP_Regs_usMinAccuDynamicFrTme */
-	/* 0x0F1240FD, */ /* on/off TNP_Regs_usMaxAccuDynamicFrTme */
+	// TNP_Regs_bUseAccurateFR
+	0x00287000,
+	0x002A3FE4,
+	0x0F120001,	                  // on/off TNP_Regs_bAccuDynamicFR
+	0x0F1234A2,	                  // on/off TNP_Regs_usMinAccuDynamicFrTme
+	0x0F1240FD,	                  // on/off TNP_Regs_usMaxAccuDynamicFrTme
 };
 
 /* Return preview mode */

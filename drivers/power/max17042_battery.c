@@ -412,15 +412,8 @@ int fg_reset_soc(void)
 	u32 fullcap;
 	int vfocv = 0;
 
-	/* delay for current stablization */
-	msleep(500);
-
-	pr_info("%s : Before quick-start - VCELL(%d), VFOCV(%d), VfSOC(%d), RepSOC(%d)\n",
-		__func__, fg_read_vcell(), fg_read_vfocv(),
-		fg_read_vfsoc(), fg_read_soc());
-	pr_info("%s : Before quick-start - current(%d), avg current(%d)\n",
-		__func__, fg_read_current(),
-		fg_read_avg_current());
+	pr_info("%s : Before quick-start - VfOCV(%d), VfSOC(%d), RepSOC(%d)\n",
+					__func__, fg_read_vfocv(), fg_read_vfsoc(), fg_read_soc());
 
 	if (!chip->pdata->check_jig_status()) {
 		pr_info("%s : Return by No JIG_ON signal\n", __func__);
@@ -444,12 +437,8 @@ int fg_reset_soc(void)
 	fg_write_register(FULLCAP_REG, chip->info.capacity);
 	msleep(500);
 
-	pr_info("%s : After quick-start - VCELL(%d), VFOCV(%d), VfSOC(%d), RepSOC(%d)\n",
-		__func__, fg_read_vcell(), fg_read_vfocv(),
-		fg_read_vfsoc(), fg_read_soc());
-	pr_info("%s : After quick-start - current(%d), avg current(%d)\n",
-		__func__, fg_read_current(),
-		fg_read_avg_current());
+	pr_info("%s : After quick-start - VfOCV(%d), VfSOC(%d), RepSOC(%d)\n",
+					__func__, fg_read_vfocv(), fg_read_vfsoc(), fg_read_soc());
 	fg_write_register(CYCLES_REG, 0x00a0);
 
 /* P8 is not turned off by Quickstart @3.4V(It's not a problem, depend on mode data
@@ -519,15 +508,11 @@ void fg_low_batt_compensation(u32 level)
 	if (read_val < 0)
 		return;
 
-	if (read_val > 2)	/* 3% compensation */
-		/* RemCapREP (05h) = FullCap(10h) x 0.0301 */
-		temp = read_val * (level*100 + 1) / 10000;
-	else				/* 1% compensation */
-		/* RemCapREP (05h) = FullCap(10h) x 0.0090 */
-		temp = read_val * (level*90) / 10000;
+	/* RemCapREP (05h) = FullCap(10h) x 0.0301 (or 0.0101) */
+	temp = read_val * (level*100 + 1) / 10000;
 	fg_write_register(REMCAP_REP_REG, (u16)temp);
 
-	/* chip->info.low_batt_comp_flag = 1; */
+	chip->info.low_batt_comp_flag = 1;
 }
 
 void fg_periodic_read(void)
@@ -823,10 +808,6 @@ void fg_check_vf_fullcap_range(void)
 			print_flag = 0;
 		}
 	}
-
-	/* delay for register setting (dQacc, dPacc) */
-	if (print_flag)
-		msleep(300);
 
 	chip->info.previous_vffullcap = fg_read_register(FULLCAP_NOM_REG);
 
@@ -1208,16 +1189,8 @@ int low_batt_compensation(int fg_soc, int fg_vcell, int fg_current)
 				bCntReset = 1;
 		}
 
-
 		if (check_low_batt_comp_condtion(&new_level)) {
-#if defined(CONFIG_MACH_P8_REV00) || \
-		defined(CONFIG_MACH_P8_REV01) || \
-		defined(CONFIG_MACH_P8LTE_REV00)
-			/* Disable 3% low battery compensation (only for P8s) */
-			/* duplicated action with 1% low battery compensation */
-			if (new_level < 2)
-#endif
-				fg_low_batt_compensation(new_level);
+			fg_low_batt_compensation(new_level);
 			reset_low_batt_comp_cnt();
 		}
 
@@ -1228,17 +1201,8 @@ int low_batt_compensation(int fg_soc, int fg_vcell, int fg_current)
 		if (chip->info.low_batt_comp_flag) {
 			pr_info("%s : MIN_CURRENT(%d), AVG_CURRENT(%d), CURRENT(%d), SOC(%d), VCELL(%d)\n",
 				__func__, fg_min_current, fg_avg_current, fg_current, fg_soc, fg_vcell);
-#if defined(CONFIG_MACH_P8_REV00) || \
-	defined(CONFIG_MACH_P8_REV01) || \
-	defined(CONFIG_MACH_P8LTE_REV00)
-	/* Do not update soc right after low battery compensation */
-	/* to prevent from powering-off suddenly (only for P8s) */
-			pr_info("%s : SOC is set to %d\n",
-				__func__, fg_read_soc());
-#else
 			fg_soc = fg_read_soc();
 			pr_info("%s : SOC is set to %d\n", __func__, fg_soc);
-#endif
 		}
 	}
 

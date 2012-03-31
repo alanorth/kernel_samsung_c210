@@ -18,6 +18,7 @@
 #define CONFIG_DVFS_LIMIT
 
 #ifdef CONFIG_DVFS_LIMIT
+#include <linux/cpufreq.h>
 #include <mach/cpufreq.h>
 #endif
 
@@ -306,188 +307,169 @@ power_attr(wake_unlock);
 #endif
 
 #ifdef CONFIG_DVFS_LIMIT
-static int dvfs_ctrl_val;
-static int dvfslock_level;
-static int dvfsctrl_locked;
-static void do_dvfsunlock_timer(struct work_struct *work);
-static DECLARE_DELAYED_WORK(dvfslock_ctrl_unlock_work, do_dvfsunlock_timer);
-DEFINE_MUTEX(dvfslock_mutex);
+static int cpufreq_min_limit_val = -1;
+static int cpufreq_min_locked;
+DEFINE_MUTEX(cpufreq_min_mutex);
 
-static void dvfslock_ctrl(const char *buf, size_t count)
+static void cpufreq_min_limit(const char *buf, size_t count)
 {
-	int ret;
-	int dlevel;
-	int dtime_msec;
-	int temp;
+	int ret, temp;
+	unsigned int cpu_lv;
 
-	mutex_lock(&dvfslock_mutex);
+	mutex_lock(&cpufreq_min_mutex);
 
-	temp = dvfs_ctrl_val;
-	ret = sscanf(buf, "%u", &dvfs_ctrl_val);
+	temp = cpufreq_min_limit_val;
+	ret = sscanf(buf, "%d", &cpufreq_min_limit_val);
 	if (ret != 1) {
-		pr_err("%s: invalid format(%d)\n", __func__, ret);
+		pr_warn("%s: invalid format(%d)\n", __func__, ret);
 		ret = -EINVAL;
 		goto out;
 	}
 
-	if (dvfs_ctrl_val == 0) {
-		if (dvfsctrl_locked) {
+	if (cpufreq_min_limit_val == -1) {
+		if (cpufreq_min_locked) {
 			s5pv310_cpufreq_lock_free(DVFS_LOCK_ID_APP);
-			dvfsctrl_locked = 0;
+			cpufreq_min_locked = 0;
 			ret = 0;
 		} else {
-			pr_warn("%s: there is no dvfslock!\n", __func__);
+			pr_warn("%s: there is no min limit!\n", __func__);
 			ret = -EINVAL;
 		}
 		goto out;
 	}
 
-	if (dvfsctrl_locked) {
-		pr_info("%s - already locked\n", __func__);
-		ret = -EINVAL;
+	pr_debug("%s: limit freq=%d\n", __func__, cpufreq_min_limit_val);
+
+	cpu_lv = s5pv310_cpufreq_round_idx(cpufreq_min_limit_val);
+	if (cpu_lv < 0)
 		goto out;
-	}
 
-	dlevel = dvfs_ctrl_val >> 16;
-	if (dlevel >= CPUFREQ_LEVEL_END || dlevel < 0) {
-		pr_warn("%s: Invalid level = %d,\n", __func__, dlevel);
-		ret = -EINVAL;
-		goto out;
-	}
+	if (cpufreq_min_locked)
+		s5pv310_cpufreq_lock_free(DVFS_LOCK_ID_APP);
 
-	dvfslock_level = dlevel;
+	s5pv310_cpufreq_lock(DVFS_LOCK_ID_APP, cpu_lv);
+	cpufreq_min_locked = 1;
 
-	dtime_msec = dvfs_ctrl_val & 0xFFFF;
-
-	pr_debug("%s: dvfs_ctrl_val=%d, level=%d, time=%d\n",
-		__func__, dvfs_ctrl_val, dlevel, dtime_msec);
-
-	s5pv310_cpufreq_lock(DVFS_LOCK_ID_APP, dlevel);
-	dvfsctrl_locked = 1;
-
-	/* If the dtime_msec is zero, wait until lock free */
-	if (dtime_msec)
-		schedule_delayed_work(&dvfslock_ctrl_unlock_work,
-					msecs_to_jiffies(dtime_msec));
 out:
 	if (ret < 0)
-		dvfs_ctrl_val = temp;
+		cpufreq_min_limit_val = temp;
 
-	mutex_unlock(&dvfslock_mutex);
+	mutex_unlock(&cpufreq_min_mutex);
 	return;
 }
 
-static void do_dvfsunlock_timer(struct work_struct *work)
-{
-	printk(KERN_DEBUG "%s: dvfs_ctrl_val=%d\n", __func__, dvfs_ctrl_val);
-
-	dvfsctrl_locked = 0;
-	s5pv310_cpufreq_lock_free(DVFS_LOCK_ID_APP);
-}
-
-static ssize_t dvfslock_ctrl_show(struct kobject *kobj,
+static ssize_t cpufreq_min_limit_show(struct kobject *kobj,
 		struct kobj_attribute *attr, char *buf)
 {
-	return sprintf(buf, "0x%08x\n", dvfs_ctrl_val);
+	return sprintf(buf, "%d\n", cpufreq_min_limit_val);
 }
 
-static ssize_t dvfslock_ctrl_store(struct kobject *kobj,
+static ssize_t cpufreq_min_limit_store(struct kobject *kobj,
 					struct kobj_attribute *attr,
 					const char *buf, size_t n)
 {
-	dvfslock_ctrl(buf, 0);
+	cpufreq_min_limit(buf, 0);
 	return n;
 }
 
-static int dvfslimit_val;
-static int dvfslimit_level;
-static int dvfslimit_locked;
-static void do_dvfslimit_unlock_timer(struct work_struct *work);
-static DECLARE_DELAYED_WORK(dvfslimit_ctrl_unlock_work, do_dvfslimit_unlock_timer);
-DEFINE_MUTEX(dvfslimit_mutex);
+static int cpufreq_max_limit_val = -1;
+static int cpufreq_max_locked;
+DEFINE_MUTEX(cpufreq_max_mutex);
 
-static void dvfslimit_ctrl(const char *buf)
+static void cpufreq_max_limit(const char *buf)
 {
-	unsigned int ret;
-	int limit_level;
-	int dtime_msec;
-	int temp;
+	int ret, temp;
+	unsigned int cpu_lv;
 
-	mutex_lock(&dvfslimit_mutex);
+	mutex_lock(&cpufreq_max_mutex);
 
-	temp = dvfslimit_val;
-	ret = sscanf(buf, "%u", &dvfslimit_val);
+	temp = cpufreq_max_limit_val;
+	ret = sscanf(buf, "%d", &cpufreq_max_limit_val);
 	if (ret != 1) {
-		printk(KERN_ERR "dvfslimit_ctrl is invalid format\n");
+		pr_warn("%s: invalid format(%d)\n", __func__, ret);
+		ret = -EINVAL;
 		goto out;
 	}
 
-	if (dvfslimit_val == 0) {
-		if (dvfslimit_locked) {
+	if (cpufreq_max_limit_val == -1) {
+		if (cpufreq_max_locked) {
 			s5pv310_cpufreq_upper_limit_free(DVFS_LOCK_ID_APP);
-			dvfslimit_locked = 0;
+			cpufreq_max_locked = 0;
+			ret = 0;
 		} else {
-			printk(KERN_ERR
-			"Write lower level than CPU_L0 for upper limit\n");
+			pr_warn("%s: there is no max limit!\n", __func__);
+			ret = -EINVAL;
 		}
 		goto out;
 	}
 
-	limit_level = dvfslimit_val >> 16;
-	if (limit_level >= CPUFREQ_LEVEL_END || limit_level < 0) {
-		printk(KERN_ERR "%s - Invalid level = %d,\n", __func__, limit_level);
+	pr_debug("%s: limit freq=%d\n", __func__, cpufreq_min_limit_val);
+
+
+	cpu_lv = s5pv310_cpufreq_round_idx(cpufreq_max_limit_val);
+	if (cpu_lv < 0)
 		goto out;
-	}
 
-	if (dvfslimit_locked) {
-		printk(KERN_ERR "%s - already locked dvfslimit_ctrl."
-				"so, your request is ignored!\n", __func__);
-		dvfslimit_val = temp;
-		goto out;
-	}
+	if (cpufreq_max_locked)
+		s5pv310_cpufreq_upper_limit_free(DVFS_LOCK_ID_APP);
 
-	dvfslimit_level = limit_level;
+	s5pv310_cpufreq_upper_limit(DVFS_LOCK_ID_APP, cpu_lv);
+	cpufreq_max_locked = 1;
 
-	dtime_msec = dvfslimit_val & 0xFFFF;
-
-	printk(KERN_DEBUG "%s: dvfslimit=%d, level=%d, time=%d\n",
-			__func__, dvfslimit_val, limit_level, dtime_msec);
-
-	s5pv310_cpufreq_upper_limit(DVFS_LOCK_ID_APP, limit_level);
-	dvfslimit_locked = 1;
-
-	if (dtime_msec)
-		schedule_delayed_work(&dvfslimit_ctrl_unlock_work,
-					msecs_to_jiffies(dtime_msec));
 out:
-	mutex_unlock(&dvfslimit_mutex);
+	if (ret < 0)
+		cpufreq_max_limit_val = temp;
+
+	mutex_unlock(&cpufreq_max_mutex);
 	return;
 }
 
-static void do_dvfslimit_unlock_timer(struct work_struct *work)
-{
-	s5pv310_cpufreq_upper_limit_free(DVFS_LOCK_ID_APP);
-	dvfslimit_locked = 0;
-}
-
-static ssize_t dvfslimit_ctrl_show(struct kobject *kobj,
+static ssize_t cpufreq_max_limit_show(struct kobject *kobj,
 		struct kobj_attribute *attr, char *buf)
 {
-	if (dvfslimit_locked)
-		return sprintf(buf, "0x%08x\n", dvfslimit_val);
-	else
-		return sprintf(buf, "%s\n", "dvfslimit unlocked");
+	return sprintf(buf, "%d\n", cpufreq_max_limit_val);
 }
 
-static ssize_t dvfslimit_ctrl_store(struct kobject *kobj, struct kobj_attribute *attr,
+static ssize_t cpufreq_max_limit_store(struct kobject *kobj,
+					struct kobj_attribute *attr,
 					const char *buf, size_t n)
 {
-	dvfslimit_ctrl(buf);
+	cpufreq_max_limit(buf);
 	return n;
 }
 
-power_attr(dvfslimit_ctrl);
-power_attr(dvfslock_ctrl);
+static ssize_t cpufreq_table_show(struct kobject *kobj,
+			struct kobj_attribute *attr, char *buf)
+{
+	ssize_t len = 0;
+	int i;
+	struct cpufreq_frequency_table *table;
+
+	table = cpufreq_frequency_get_table(0);
+
+	for (i = 0; table[i].frequency != CPUFREQ_TABLE_END; i++) {
+		unsigned int freq = table[i].frequency;
+		len += sprintf(buf + len, "%u ", freq);
+	}
+	if (i > 0)
+		len--;
+
+	len += sprintf(buf + len, "\n");
+
+	return len;
+}
+
+static ssize_t cpufreq_table_store(struct kobject *kobj,
+					struct kobj_attribute *attr,
+					const char *buf, size_t n)
+{
+	pr_warn("%s: Not supported\n", __func__);
+	return n;
+}
+
+power_attr(cpufreq_max_limit);
+power_attr(cpufreq_min_limit);
+power_attr(cpufreq_table);
 #endif
 
 static struct attribute * g[] = {
@@ -507,8 +489,9 @@ static struct attribute * g[] = {
 #endif
 #endif
 #ifdef CONFIG_DVFS_LIMIT
-	&dvfslock_ctrl_attr.attr,
-	&dvfslimit_ctrl_attr.attr,
+	&cpufreq_min_limit_attr.attr,
+	&cpufreq_max_limit_attr.attr,
+	&cpufreq_table_attr.attr,
 #endif
 	NULL,
 };

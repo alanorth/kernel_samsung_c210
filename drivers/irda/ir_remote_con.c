@@ -17,8 +17,8 @@
 
 #define BIT_SIZE 32
 #define MAX_SIZE 1024
-#define NANO_SEC 1000*1000*1000
-#define MICRO_SEC 1000*1000
+#define NANO_SEC 1000000000
+#define MICRO_SEC 1000000
 
 extern struct class *sec_class;
 
@@ -42,68 +42,35 @@ static int gpio_init(struct ir_remocon_data *data)
 	return err;
 }
 
-static void enable_high(struct ir_remocon_data *data, unsigned int cnt,
-			unsigned int period)
-{
-	int i;
-	unsigned int duty = period / 3;
-	unsigned int on, off = 0;
-
-	unsigned int model_offset1 = 1;
-	unsigned int model_offset2 = 2;
-
-#if defined(CONFIG_MACH_P8LTE_REV00) || defined(CONFIG_MACH_P8_REV00) \
-	|| defined(CONFIG_MACH_P8_REV01)
-	model_offset1 = 0;
-	model_offset2 = 0;
-#endif
-
-	if (cnt <= 18) {
-		on = duty - model_offset2;
-		off = period - duty - 3;
-	} else if (cnt <= 23) {
-		on = duty - model_offset2;
-		off = period - duty - 2;
-	} else if (cnt <= 27) {
-		on = duty - model_offset2;
-		off = period - duty - 1;
-	} else {
-		on = duty - model_offset1;
-		off = period - duty - 1;
-	}
-
-	for (i = 0; i < cnt; i++) {
-		gpio_direction_output(data->gpio, 1);
-		__udelay(on);
-		gpio_direction_output(data->gpio, 0);
-		__udelay(off);
-	}
-}
-
 static void ir_remocon_send(struct ir_remocon_data *data)
 {
-	struct regulator *regulator;
-	unsigned int period = 0;
-	unsigned int off_period = 0;
-	int i, ret;
-	static int cpu_lv = -1;
-	period = MICRO_SEC / data->signal[0];
+	struct regulator	*regulator;
+	unsigned int		period, off_period = 0;
+	unsigned int		duty;
+	unsigned int		on, off = 0;
+	unsigned int		i, j, ret;
+	static int		cpu_lv = -1;
 
-	if (data->pwr_en == NULL) {
+	if (data->pwr_en == -1) {
 		regulator = regulator_get(NULL, "vled_3.3v");
 		if (IS_ERR(regulator))
-			return -ENODEV;
+			goto out;
 
 		regulator_enable(regulator);
 	}
 
-	if (data->pwr_en != NULL)
+	if (data->pwr_en != -1)
 		gpio_direction_output(data->pwr_en, 1);
 
 	__udelay(1000);
 
-	if (cpu_lv == -1)
-		cpu_lv = s5pv310_cpufreq_round_idx(CPUFREQ_800MHZ);
+	if (cpu_lv == -1) {
+		if (data->pwr_en == -1)
+			cpu_lv = s5pv310_cpufreq_round_idx(CPUFREQ_500MHZ);
+		else
+			cpu_lv = s5pv310_cpufreq_round_idx(CPUFREQ_800MHZ);
+	}
+
 	ret = s5pv310_cpufreq_lock(DVFS_LOCK_ID_IR_LED, cpu_lv);
 	if (ret < 0)
 		pr_err("%s: fail to lock cpufreq\n", __func__);
@@ -112,37 +79,65 @@ static void ir_remocon_send(struct ir_remocon_data *data)
 	if (ret < 0)
 		pr_err("%s: fail to lock cpufreq(limit)\n", __func__);
 
+	if (data->pwr_en == -1)
+		period  = (MICRO_SEC/data->signal[0])-2;
+	else
+		period  = (MICRO_SEC/data->signal[0])-1;
+
+	duty = period/4;
+	on = duty;
+	off = period - duty;
+
 	local_irq_disable();
-	for (i = 1; i < MAX_SIZE;) {
+	for (i = 1; i < MAX_SIZE; i += 2) {
 		if (data->signal[i] == 0)
 			break;
-		enable_high(data, data->signal[i++], period);
-		off_period = data->signal[i++] * period;
-		if (off_period <= 9999) {
-			if (off_period <= 520)
-				__udelay(off_period + 60);
-			else if (off_period <= 860)
-				__udelay(off_period + 40);
-			else
-				__udelay(off_period + 70);
-		} else {
-			off_period /= 1000;
-			mdelay(off_period);
+
+		for (j = 0; j < data->signal[i]; j++) {
+			gpio_direction_output(data->gpio, 1);
+			__udelay(on);
+			gpio_direction_output(data->gpio, 0);
+			__udelay(off);
 		}
 
-	}
-	local_irq_enable();
+		if (data->pwr_en == -1)
+			period = (MICRO_SEC/data->signal[0]);
+		else
+			period = (MICRO_SEC/data->signal[0])+1;
 
+		off_period = data->signal[i+1]*period;
+
+		if (off_period <= 9999) {
+			if (off_period > 1000) {
+				__udelay(off_period % 1000);
+				mdelay(off_period/1000);
+			} else
+				__udelay(off_period);
+		} else {
+			local_irq_enable();
+			__udelay(off_period % 1000);
+			mdelay(off_period/1000);
+			local_irq_disable();
+		}
+	}
+	gpio_direction_output(data->gpio, 1);
+	__udelay(on);
+	gpio_direction_output(data->gpio, 0);
+	__udelay(off);
+
+	local_irq_enable();
+	pr_info("%s end!\n", __func__);
 	s5pv310_cpufreq_lock_free(DVFS_LOCK_ID_IR_LED);
 	s5pv310_cpufreq_upper_limit_free(DVFS_LOCK_ID_IR_LED);
 
-	if (data->pwr_en != NULL)
+	if (data->pwr_en != -1)
 		gpio_direction_output(data->pwr_en, 0);
 
-	if (data->pwr_en == NULL) {
+	if (data->pwr_en == -1) {
 		regulator_force_disable(regulator);
 		regulator_put(regulator);
 	}
+out: ;
 }
 
 static void ir_remocon_send_test(struct ir_remocon_data *data)
@@ -152,15 +147,15 @@ static void ir_remocon_send_test(struct ir_remocon_data *data)
 	int i;
 	period = MICRO_SEC / data->signal[0];
 
-	if (data->pwr_en == NULL) {
+	if (data->pwr_en == -1) {
 		regulator = regulator_get(NULL, "vled_3.3v");
 		if (IS_ERR(regulator))
-			return -ENODEV;
+			goto out;
 
 		regulator_enable(regulator);
 	}
 
-	if (data->pwr_en != NULL)
+	if (data->pwr_en != -1)
 		gpio_direction_output(data->pwr_en, 1);
 
 	local_irq_disable();
@@ -177,69 +172,15 @@ static void ir_remocon_send_test(struct ir_remocon_data *data)
 	}
 	local_irq_enable();
 
-	if (data->pwr_en != NULL)
+	if (data->pwr_en != -1)
 		gpio_direction_output(data->pwr_en, 0);
 
-	if (data->pwr_en == NULL) {
+	if (data->pwr_en == -1) {
 		regulator_force_disable(regulator);
 		regulator_put(regulator);
 	}
+out: ;
 }
-
-// #define IR_TEST ==> Not valuable(2011.09.02)
-#ifdef IR_TEST
-const unsigned int signal1[MAX_SIZE] = {38400,173,171,24,62,24,61,24,62,24,17,24,17,
-	24,18,24,17,24,19,22,62,24,61,24,62,24,19,22,17,25,17,24,17,24,17,24,62,24,
-	61,25,61,24,17,24,19,23,17,24,17,24,20,22, 17,24,17,24,17,25,61,24,62,24,61,24,62,24,61,24,1880, 0, };
-const unsigned int signal2[MAX_SIZE] = {38400,173,171,24,62,24,61,24,62,24,17,24,17,24,18,24,17,24,18,23,62,24,61,24,62,24,18,23,17,25,17,24,17,24,17,24,62,24,61,25,17,24,61,24,18,24,17,24,17,24,18,24,17,24,17,24,62,24,17,24,62,24,61,24,62,24,61,24,1880,0, };
-void ir_test(bool up) // ir_test is not functionable(2011.09.02)
-{
-
-	struct regulator *regulator;
-	unsigned int period = 0;
-	int i;
-	unsigned int signal[MAX_SIZE];
-
-	regulator = regulator_get(NULL, "vled_3.3v");
-	regulator_enable(regulator);
-
-	if (up) {
-		pr_info("********* IrDA : %s(up)!!\n", __func__);
-		memcpy(signal, signal1, sizeof(signal1));
-	} else {
-		pr_info("********* IrDA : %s(down)!!\n", __func__);
-		memcpy(signal, signal2, sizeof(signal2));
-	}
-
-	period = MICRO_SEC / signal[0];
-
-	pr_info("duty : %u\n", period);
-
-#if defined(CONFIG_MACH_P8LTE_REV00) || defined(CONFIG_MACH_P8_REV00) || defined(CONFIG_MACH_P8_REV01)
-	gpio_direction_output(GPIO_IRDA_EN, 1);
-#endif
-	local_irq_disable();
-
-	for (i = 1; i < MAX_SIZE;) {
-		if (signal[i] == 0)
-			break;
-		enable_high(signal[i++], period);
-		__udelay(signal[i++] * period);
-	}
-
-	local_irq_enable();
-
-	pr_info("********* IrDA : %s send complited!!\n", __func__);
-
-#if defined(CONFIG_MACH_P8LTE_REV00) || defined(CONFIG_MACH_P8_REV00) || defined(CONFIG_MACH_P8_REV01)
-	gpio_direction_output(GPIO_IRDA_EN, 0);
-#endif
-
-	regulator_force_disable(regulator);
-}
-
-EXPORT_SYMBOL(ir_test);
-#endif
 
 static void ir_remocon_work(struct work_struct *work)
 {
@@ -267,13 +208,13 @@ static ssize_t remocon_store(struct device *dev, struct device_attribute *attr,
 	unsigned int _data;
 
 	for (i = 0; i < MAX_SIZE; i++) {
-		if (i == 0)
-			mdelay(20);
 		if (sscanf(buf++, "%u", &_data) == 1) {
 			data->signal[i] = _data;
 			if (data->signal[i] == 0)
 				break;
-//                      pr_info("%u,", data->signal[i]);
+#if 0
+			pr_info("%d = %d,", i, data->signal[i]);
+#endif
 			while (_data > 0) {
 				buf++;
 				_data /= 10;
@@ -283,15 +224,6 @@ static ssize_t remocon_store(struct device *dev, struct device_attribute *attr,
 			break;
 		}
 	}
-
-#if defined(CONFIG_MACH_P2_REV00) || defined(CONFIG_MACH_P2_REV01) || defined(CONFIG_MACH_P2_REV02) || defined(CONFIG_MACH_P4W_REV01)
-	data->gpio = GPIO_IRDA_CONTROL;
-	data->pwr_en = NULL;
-#endif
-#if defined(CONFIG_MACH_P8LTE_REV00) || defined(CONFIG_MACH_P8_REV00) || defined(CONFIG_MACH_P8_REV01)
-	data->gpio = GPIO_IRDA_nINT;
-	data->pwr_en = GPIO_IRDA_EN;
-#endif
 
 	if (!work_pending(&data->work))
 		schedule_work(&data->work);
@@ -323,8 +255,6 @@ static DEVICE_ATTR(ir_send_test, 0664, NULL, remocon_store);
 static ssize_t check_ir_show(struct device *dev, struct device_attribute *attr,
 			     char *buf)
 {
-//      struct ir_remocon_data *data = dev_get_drvdata(dev);
-
 	int _data = 1;
 	return sprintf(buf, "%d\n", _data);
 }
@@ -333,13 +263,13 @@ static DEVICE_ATTR(check_ir, 0664, check_ir_show, NULL);
 
 static int __devinit ir_remocon_probe(struct platform_device *pdev)
 {
-	pr_info("********* Ir_LED : %s start!\n", __func__);
-
 	struct ir_remocon_data *data = pdev->dev.platform_data;
 	struct ir_remocon_data *data1 = pdev->dev.platform_data;
 	struct device *ir_remocon_dev;
 	struct device *ir_remocon_dev_test;
 	int error;
+
+	pr_info("********* Ir_LED : %s start!\n", __func__);
 
 	data = kzalloc(sizeof(struct ir_remocon_data), GFP_KERNEL);
 	if (NULL == data) {
@@ -354,6 +284,14 @@ static int __devinit ir_remocon_probe(struct platform_device *pdev)
 		error = -ENOMEM;
 		goto err_free_mem;
 	}
+#if defined(CONFIG_MACH_P2_REV00) || defined(CONFIG_MACH_P2_REV01) || defined(CONFIG_MACH_P2_REV02) || defined(CONFIG_MACH_P4W_REV01)
+	data->gpio = GPIO_IRDA_CONTROL;
+	data->pwr_en = -1;
+#endif
+#if defined(CONFIG_MACH_P8LTE_REV00) || defined(CONFIG_MACH_P8_REV00) || defined(CONFIG_MACH_P8_REV01)
+	data->gpio = GPIO_IRDA_nINT;
+	data->pwr_en = GPIO_IRDA_EN;
+#endif
 
 	mutex_init(&data->mutex);
 	INIT_WORK(&data->work, ir_remocon_work);
@@ -396,7 +334,6 @@ static int __devinit ir_remocon_probe(struct platform_device *pdev)
 
 static int __devexit ir_remocon_remove(struct platform_device *pdev)
 {
-	//    struct dock_keyboard_data *pdata = pdev->dev.platform_data;
 	return 0;
 }
 
@@ -427,6 +364,10 @@ static struct platform_driver ir_remocon_device_driver = {
 
 static int __init ir_remocon_init(void)
 {
+#if defined(CONFIG_IR_REMOCON_EUR)
+	if (system_rev >= 11)
+		return 0;
+#endif
 	return platform_driver_register(&ir_remocon_device_driver);
 }
 

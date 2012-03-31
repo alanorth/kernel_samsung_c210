@@ -120,7 +120,6 @@ static u8 reg_defaults[5] = {
 #define ALS_IOUT_ADC	9
 
 #if defined(CONFIG_MACH_P8_REV01)
-
 static const int adc_table[4] = {
 	320,
 	840,
@@ -128,8 +127,15 @@ static const int adc_table[4] = {
 	1950,
 };
 
-#elif defined(CONFIG_MACH_P2_REV02)
+#elif defined(CONFIG_MACH_P2_GER)
+static const int adc_table[4] = {
+	480,
+	975,
+	1535,
+	2090,
+};
 
+#elif defined(CONFIG_MACH_P2_REV02)
 static const int adc_table[4] = {
 	450,
 	1010,
@@ -137,9 +143,7 @@ static const int adc_table[4] = {
 	2140,
 };
 
-
 #else
-
 static const int adc_table[4] = {
 	430,
 	925,
@@ -342,12 +346,8 @@ static ssize_t proximity_enable_store(struct device *dev,
 			| GP2A_BIT_OPMOD_VCON_NORMAL_MODE
 			| GP2A_BIT_OPMOD_ASD_INEFFECTIVE;
 		gp2a_i2c_write(gp2a, REGS_OPMOD, &val);
-
 		val = GP2A_BIT_CON_OCON_ENABLE_VOUT;
 		gp2a_i2c_write(gp2a, REGS_CON, &val);
-
-		val = VO_0;
-		gp2a_i2c_write(gp2a, REGS_HYS, &val);
 #else
 		gp2a_i2c_write(gp2a, REGS_GAIN, &reg_defaults[1]);
 		gp2a_i2c_write(gp2a, REGS_HYS, &reg_defaults[2]);
@@ -412,6 +412,7 @@ static struct attribute_group proximity_attribute_group = {
 
 static int lightsensor_get_adcvalue(struct gp2a_data *gp2a)
 {
+	int i = 0;
 	int value = 0;
 	int fake_value;
 	unsigned int adc_avr_value;
@@ -497,6 +498,7 @@ static void gp2a_work_func_proximity(struct work_struct *work)
 {
 	int	ret;
 	u8 value;
+	u8 vout = 0;
 
 	struct gp2a_data *gp2a = container_of(work, struct gp2a_data,
 					work_proximity);
