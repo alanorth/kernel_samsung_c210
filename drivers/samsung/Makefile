@@ -7,3 +7,4 @@
 obj-$(CONFIG_VIBETONZ)		+= vibetonz/
 obj-$(CONFIG_SAMSUNG_LTE_BOOTLOADER)	+= lte_bootloader/
 obj-$(CONFIG_SAMSUNG_LTE_MODEMCTL)		+= lte_modemctl/
+obj-$(CONFIG_J4FS)		+= j4fs/
