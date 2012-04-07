@@ -1,7 +1,7 @@
 #
 # Automatically generated make config: don't edit
 # Linux kernel version: 2.6.36
-# Fri Apr  6 20:22:00 2012
+# Fri Apr  6 20:26:32 2012
 #
 CONFIG_ARM=y
 CONFIG_HAVE_PWM=y
@@ -43,8 +43,8 @@ CONFIG_LOCALVERSION="-cyanogenmod"
 CONFIG_HAVE_KERNEL_GZIP=y
 CONFIG_HAVE_KERNEL_LZMA=y
 CONFIG_HAVE_KERNEL_LZO=y
-CONFIG_KERNEL_GZIP=y
-# CONFIG_KERNEL_LZMA is not set
+# CONFIG_KERNEL_GZIP is not set
+CONFIG_KERNEL_LZMA=y
 # CONFIG_KERNEL_LZO is not set
 # CONFIG_SWAP is not set
 CONFIG_SYSVIPC=y
