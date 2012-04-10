@@ -102,6 +102,7 @@ obj-$(CONFIG_S5PV310_DEV_PD)		+= dev-pd.o
 obj-$(CONFIG_DEV_THERMAL)		+= tmu.o
 obj-$(CONFIG_SEC_DEBUG)			+= sec_debug.o sec_getlog.o sec_gaf.o
 obj-$(CONFIG_S5PV310_WATCHDOG_RESET)	+= c1-watchdog.o
+obj-$(CONFIG_SEC_LOG)	+= sec_log.o
 obj-$(CONFIG_SEC_THERMISTOR)		+= sec_thermistor.o
 obj-$(CONFIG_SAMSUNG_LTE)		+= lte-modem.o
 obj-$(CONFIG_CDMA_LINK_DPRAM)           += board-c1-modem_ota.o setup-dpram.o
