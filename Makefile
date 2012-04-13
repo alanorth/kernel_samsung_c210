@@ -335,8 +335,8 @@ CHECKFLAGS     := -D__linux__ -Dlinux -D__STDC__ -Dunix -D__unix__ \
 CFLAGS_MODULE   =
 AFLAGS_MODULE   =
 LDFLAGS_MODULE  =
-CFLAGS_KERNEL	=
-AFLAGS_KERNEL	=
+CFLAGS_KERNEL	= -mtune=cortex-a9 -mfpu=neon
+AFLAGS_KERNEL	= -mtune=cortex-a9 -mfpu=neon
 CFLAGS_GCOV	= -fprofile-arcs -ftest-coverage
 
 
