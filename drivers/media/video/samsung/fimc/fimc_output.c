@@ -204,7 +204,7 @@ int fimc_outdev_stop_streaming(struct fimc_control *ctrl, struct fimc_ctx *ctx)
 		if (ret == 0) {
 			if (ctrl->out == NULL) {
 				fimc_err("%s: ctrl->out is changed to null\n",
-						__func__, ctrl->out);
+						__func__);
 				return -EINVAL;
 			}
 			fimc_dump_context(ctrl, ctx);
@@ -2337,7 +2337,7 @@ static int fimc_qbuf_output_single_buf(struct fimc_control *ctrl,
 		buf_set.vaddr_base[FIMC_ADDR_CB] = buf_set.base[FIMC_ADDR_Y] + y_size;
 		break;
 	case V4L2_PIX_FMT_NV12T:
-		if(rot == 0 || rot == 180)
+		if (rot == 0 || rot == 180)
 			fimc_get_nv12t_size(width, height, &y_size, &c_size);
 		else
 			fimc_get_nv12t_size(height, width, &y_size, &c_size);
@@ -2365,7 +2365,7 @@ static int fimc_qbuf_output_single_buf(struct fimc_control *ctrl,
 		buf_set.base[FIMC_ADDR_CB] = buf_set.base[FIMC_ADDR_Y] + y_size;
 		break;
 	case V4L2_PIX_FMT_NV12T:
-		if(rot == 0 || rot == 180)
+		if (rot == 0 || rot == 180)
 			fimc_get_nv12t_size(width, height, &y_size, &c_size);
 		else
 			fimc_get_nv12t_size(height, width, &y_size, &c_size);
@@ -2722,7 +2722,7 @@ int fimc_qbuf_output(void *fh, struct v4l2_buffer *b)
 	ctx = &ctrl->out->ctx[ctx_id];
 	fimc_info2("ctx(%d) queued idx = %d\n", ctx->ctx_num, b->index);
 	if (ctx->status == FIMC_STREAMOFF) {
-		printk("%s:: can not queue is FIMC_STREAMOFF status \n",
+		fimc_err("%s:: can not queue is FIMC_STREAMOFF status\n",
 				__func__);
 		return ret;
 	}
@@ -3022,7 +3022,7 @@ int fimc_init_in_queue(struct fimc_control *ctrl, struct fimc_ctx *ctx)
 	for (i = 0; i < swap_cnt; i++) {
 		ctrl->out->inq[i].ctx = swap_queue[i].ctx;
 		ctrl->out->inq[i].idx = swap_queue[i].idx;
- }
+	}
 
 	spin_unlock_irqrestore(&ctrl->out->lock_in, spin_flags);
 

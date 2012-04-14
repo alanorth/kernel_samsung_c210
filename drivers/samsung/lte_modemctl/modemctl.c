@@ -29,6 +29,9 @@
 #endif
 #include <linux/reboot.h>
 
+#include <linux/irq.h>
+#include <linux/pm_runtime.h>
+
 #define HOST_WUP_LEVEL 1
 
 enum {
@@ -43,11 +46,14 @@ enum {
 
 /* FIXME: Don't use this except pm */
 extern struct usbsvn *share_svn;
+extern int lte_silent_reset_mode;
+
+extern struct platform_device s3c_device_usb_ehci;
 
 int modemctl_shutdown_flag;
 
 static struct modemctl *global_mc;
-static int ready;
+static int lte_ready;
 
 int mc_is_phone_on_disable(void)
 {
@@ -90,6 +96,15 @@ int mc_control_active_state(int val)
 }
 EXPORT_SYMBOL_GPL(mc_control_active_state);
 
+int mc_get_active_state()
+{
+	if (!global_mc)
+		return 0;
+
+	return gpio_get_value(global_mc->gpio_host_active);
+}
+EXPORT_SYMBOL_GPL(mc_get_active_state);
+
 int mc_control_slave_wakeup(int val)
 {
 	if (!global_mc)
@@ -127,22 +142,35 @@ int mc_is_slave_wakeup(void)
 }
 EXPORT_SYMBOL_GPL(mc_is_slave_wakeup);
 
-void mc_phone_active_irq_enable(int on)
+void mc_phone_active_irq_enable()
 {
 	if (!global_mc)
 		return;
 
-	pr_info("%s(%d)\n", __func__, on);
+	if (lte_ready)
+		return;
 
-	if (on) {
-		enable_irq(global_mc->irq[0]);
-		ready = 1;
-	} else {
-		disable_irq(global_mc->irq[0]);
-		ready = 0;
-	}
+	pr_info("%s\n", __func__);
+
+	enable_irq(global_mc->irq[0]);
+	lte_ready = 1;
 }
 EXPORT_SYMBOL_GPL(mc_phone_active_irq_enable);
+
+void mc_phone_active_irq_disable()
+{
+	if (!global_mc)
+		return;
+
+	if (!lte_ready)
+		return;
+
+	pr_info("%s\n", __func__);
+
+	disable_irq(global_mc->irq[0]);
+	lte_ready = 0;
+}
+EXPORT_SYMBOL_GPL(mc_phone_active_irq_disable);
 
 int mc_prepare_resume(int ms_time)
 {
@@ -240,6 +268,8 @@ static int modem_off(struct modemctl *mc)
 	if (!mc->ops || !mc->ops->modem_off)
 		return -ENXIO;
 
+	mc_phone_active_irq_disable();
+
 	mc->ops->modem_off(mc);
 
 	return 0;
@@ -260,6 +290,8 @@ static int modem_boot(struct modemctl *mc)
 	if (!mc->ops || !mc->ops->modem_boot)
 		return -ENXIO;
 
+	mc_phone_active_irq_enable();
+
 	mc->ops->modem_boot(mc);
 
 	return 0;
@@ -279,29 +311,35 @@ static int modem_get_active(struct modemctl *mc)
 static void dump_start(struct modemctl *mc)
 {
 	char *envs[2] = {NULL, NULL};
+	struct usb_hcd *ehci_hcd = platform_get_drvdata(&s3c_device_usb_ehci);
+
+	if (lte_silent_reset_mode)
+		return;
 
 	mc->cpcrash_flag = 1;
 
-	envs[0] = "MAILBOX=dump_start";
-	kobject_uevent_env(&mc->dev->kobj, KOBJ_OFFLINE, envs);
+	pm_runtime_get_sync(&s3c_device_usb_ehci.dev);
 
 	modem_reset(mc);
-	mc_control_active_state(0);
+	gpio_set_value(mc->gpio_host_active, 0);
+	msleep(5);
+
+	envs[0] = "MAILBOX=dump_start";
+	kobject_uevent_env(&mc->dev->kobj, KOBJ_OFFLINE, envs);
 
 	dev_err(mc->dev, "LTE Crash! - dump start\n");
 }
 
 static void dump_end(struct modemctl *mc)
 {
-	char *envs[2] = {NULL, NULL};
 	mc->cpcrash_flag = 0;
+	if (lte_silent_reset_mode)
+		lte_silent_reset_mode = 0;
 
-	envs[0] = "MAILBOX=dump_end";
-	kobject_uevent_env(&mc->dev->kobj, KOBJ_OFFLINE, envs);
-
+#if 0
 	modem_reset(mc);
 	mc_control_active_state(1);
-
+#endif
 	dev_err(mc->dev, "LTE Crash! - dump end\n");
 }
 
@@ -349,11 +387,14 @@ static ssize_t store_control(struct device *d,
 		modem_boot(mc);
 
 	if (!strncmp(buf, "daolpu", 6))
-		kernel_upload(mc);
+		panic("LTE Crash");
 
 	if (!strncmp(buf, "silent", 6)) {
-		dev_err(mc->dev, "%s - LTE Silent Reset!!!\n", __func__);
-		crash_event(1);
+		if (lte_silent_reset_mode == 0) {
+			dev_err(mc->dev, "%s - LTE Silent Reset!!!\n",
+					__func__);
+			crash_event(1);
+		}
 	}
 
 	if (!strncmp(buf, "dump", 4)) {
@@ -472,7 +513,9 @@ void crash_event(int type)
 	if (!global_mc)
 		return;
 
-	pr_err("LTE Crash Event");
+	pr_err("LTE Silent Reset\n");
+
+	lte_silent_reset_mode = 1;
 
 	envs[0] = "MAILBOX=lte_reset";
 	kobject_uevent_env(&global_mc->dev->kobj, KOBJ_CHANGE, envs);
@@ -484,7 +527,7 @@ static void mc_work(struct work_struct *work_arg)
 		work.work);
 	int ret = modem_get_active(mc);
 
-	if (!ready)
+	if (!lte_ready)
 		return;
 
 	dev_err(mc->dev, "%s - phone active: %d\n", __func__, ret);
@@ -507,13 +550,15 @@ static void mc_resume_worker(struct work_struct *work)
 	int val = gpio_get_value(mc->gpio_host_wakeup);
 	int err;
 
-	if (!ready)
+	if (!lte_ready)
 		return;
 
 	if ((share_svn != NULL) && (val == HOST_WUP_LEVEL)) {
-		err = usbsvn_request_resume();
-		if (err < 0)
+	err = usbsvn_request_resume();
+		if (err < 0) {
 			dev_err(mc->dev, "request resume failed: %d\n", err);
+			crash_event(1);
+		}
 	}
 }
 
@@ -522,7 +567,7 @@ static irqreturn_t modemctl_resume_irq(int irq, void *dev_id)
 	struct modemctl *mc = (struct modemctl *)dev_id;
 	int val = gpio_get_value(mc->gpio_host_wakeup);
 
-	if (!ready)
+	if (!lte_ready)
 		return IRQ_HANDLED;
 
 	pr_info("< H- WUP %d (S %d)\n", val, mc_is_slave_wakeup());
@@ -558,7 +603,7 @@ static irqreturn_t modemctl_irq_handler(int irq, void *dev_id)
 {
 	struct modemctl *mc = (struct modemctl *)dev_id;
 
-	if (!ready)
+	if (!lte_ready)
 		return IRQ_HANDLED;
 
 	if (!work_pending(&mc->work.work))
@@ -659,7 +704,7 @@ static int __devinit modemctl_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, mc);
 	global_mc = mc;
 
-	ready = 0;
+	lte_ready = 0;
 
 	return 0;
 

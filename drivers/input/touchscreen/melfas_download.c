@@ -25,10 +25,6 @@
 #include <linux/uaccess.h>
 #define MELFAS_FW1 "/sdcard/Master.bin"
 
-#include <plat/regs-watchdog.h>
-#include <mach/map.h>
-#define TPS 3200
-#define TSP_FW_WATCHDOG	1
 
 //============================================================
 //
@@ -46,9 +42,9 @@
 //rev 0,1
 #include "GFS_01x04.c"
 //rev 2~
-#include "GFS_03x14.c"
+#include "GFS_03x11.c"
 #include "G2M_12x09.c"
-#include "GFD_26x07.c"
+#include "GFD_26x04.c"
 
 // TEST
 #include "TEST_FW.c"
@@ -352,11 +348,6 @@ static int mcsdl_download(const UINT8 *pBianry, const UINT16 unLength,
 	printk(" > Program   ");
 #endif
 
-#if TSP_FW_WATCHDOG
-	writel(20 * TPS, S3C2410_WTCNT);
-	pr_info("[TSP] Watchdog kicking Before Flash");
-#endif
-
 	preempt_disable();
 	nRet = mcsdl_program_flash((UINT8*) pBianry, (UINT16) unLength, IdxNum);
 	preempt_enable();
@@ -369,11 +360,6 @@ static int mcsdl_download(const UINT8 *pBianry, const UINT16 unLength,
 
 #if MELFAS_ENABLE_DBG_PROGRESS_PRINT
 	printk(" > Verify    ");
-#endif
-
-#if TSP_FW_WATCHDOG
-	writel(20 * TPS, S3C2410_WTCNT);
-	pr_info("[TSP] Watchdog kicking Before Verify");
 #endif
 
 	preempt_disable();
@@ -394,11 +380,6 @@ static int mcsdl_download(const UINT8 *pBianry, const UINT16 unLength,
 #if MELFAS_ENABLE_DBG_PROGRESS_PRINT
 	printk(" > Rebooting\n");
 	printk(" - Fin.\n\n");
-#endif
-
-#if TSP_FW_WATCHDOG
-	writel(20 * TPS, S3C2410_WTCNT);
-	pr_info("[TSP] Watchdog kicking After F/W update");
 #endif
 
 	mcsdl_reboot_mcs();

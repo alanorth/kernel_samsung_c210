@@ -43,6 +43,8 @@ static const unsigned rxq_size = 1;
 static int rx_debug;
 static int tx_debug;
 
+static int packet_drop;
+
 struct usbsvn *share_svn;
 EXPORT_SYMBOL(share_svn);
 
@@ -93,11 +95,9 @@ extern int mc_control_slave_wakeup(int val);
 extern int mc_is_slave_wakeup(void);
 #endif
 
-#ifdef AIRPLAIN_MODE_TEST
 extern int lte_airplain_mode;
-#endif
-
 extern int modemctl_shutdown_flag;
+extern int lte_silent_reset_mode;
 
 #ifdef CONFIG_HAS_WAKELOCK
 enum {
@@ -252,6 +252,7 @@ static void usbsvn_try_reconnect_work(struct work_struct *work)
 
 	if (svn->usbsvn_connected) {
 		wake_unlock_pm(svn);
+
 		printk(KERN_INFO "svn re-connected\n");
 		goto out;
 	}
@@ -581,9 +582,9 @@ static DEVICE_ATTR(tx_debug, 0664, usbsvn_tx_debug_show, usbsvn_tx_debug_store);
 static DEVICE_ATTR(connected, S_IRUGO | S_IRUSR, usbsvn_connection_show, NULL);
 static DEVICE_ATTR(waketime, S_IRUGO | S_IWUSR, show_waketime, store_waketime);
 #ifdef CONFIG_BRIDGE
-static DEVICE_ATTR(resume, S_IRUGO | S_IWUGO, NULL, usbsvn_bridge_resume_store);
-static DEVICE_ATTR(suspend, S_IRUGO | S_IWUGO, NULL, usbsvn_bridge_suspend_store);
-static DEVICE_ATTR(interfaceid, S_IRUGO | S_IWUGO, NULL, usbsvn_intf_id_store);
+static DEVICE_ATTR(resume, 0664, NULL, usbsvn_bridge_resume_store);
+static DEVICE_ATTR(suspend, 0664, NULL, usbsvn_bridge_suspend_store);
+static DEVICE_ATTR(interfaceid, 0664, NULL, usbsvn_intf_id_store);
 #endif
 
 static struct attribute *usbsvn_attrs[] = {
@@ -613,7 +614,8 @@ static int usbsvn_initiated_resume(struct net_device *ndev)
 
 	if (share_svn->usbdev && share_svn->usbsvn_connected) {
 		struct device *dev = &share_svn->usbdev->dev;
-		int spin = 10, spin2 = 30;
+		int spin = 10;
+		int spin2 = 200;
 		int host_wakeup_done = 0;
 		int _host_high_cnt = 0, _host_timeout_cnt = 0;
 retry:
@@ -662,7 +664,7 @@ retry:
 				crash_event(1);
 				return -ETIMEDOUT;
 			}
-			msleep(20);
+			msleep(25);
 			goto retry;
 
 		case RPM_SUSPENDING:
@@ -787,18 +789,34 @@ static void usbsvn_tx_worker(struct work_struct *work)
 		if (err < 0) {
 			printk(KERN_ERR "%s:svn write error=(%d)\n", __func__, err);
 			skb = tx_data.skb;
+			packet_drop++;
+			msleep(10);
+
 			goto drop;
 		}
+		packet_drop = 0;
 		goto dequeue;
 
 drop:
-		printk(KERN_ERR "%s drop\n", __func__);
+		printk(KERN_ERR "%s packet dropped (len: %d)", __func__, skb->len);
 		dev_kfree_skb(skb);
 		dev->stats.tx_dropped++;
+
+		if (packet_drop > 10)
+			goto exit;
 
 dequeue:
 		skb = skb_dequeue(&svn->tx_skb_queue);
 	}
+
+	return;
+
+exit:
+	skb_queue_purge(&svn->tx_skb_queue);
+	packet_drop = 0;
+	crash_event(1);
+
+	return;
 }
 
 static void tx_complete(struct urb *req)
@@ -877,7 +895,8 @@ static void rx_complete(struct urb *req)
 	int err;
 
 	/*hold on active mode until xmit*/
-	if (svn->usbdev)
+	if (svn->usbdev && req->status != -ECONNRESET &&
+			req->status != -ESHUTDOWN)
 		usb_mark_last_busy(svn->usbdev);
 	wake_lock_pm(svn);
 
@@ -940,13 +959,13 @@ static void rx_complete(struct urb *req)
 
 	case -EPROTO:
 		dev_err(&dev->dev, "%s - Rx Protocol Error", __func__);
+		dev->stats.rx_errors++;
 		break;
 	}
 
-	dev->stats.rx_errors++;
-
 resubmit:
-	kfree(svn_rx);
+	if (svn_rx)
+		kfree(svn_rx);
 
 	if (page)
 		netdev_free_page(dev, page);
@@ -954,7 +973,7 @@ resubmit:
 		rx_submit(svn, dev_id, req, GFP_ATOMIC);
 
 	/*hold on active mode until xmit*/
-	if (svn->usbdev)
+	if (req && svn->usbdev)
 		usb_mark_last_busy(svn->usbdev);
 	wake_lock_pm(svn);
 }
@@ -1149,7 +1168,7 @@ int usbsvn_probe(struct usb_interface *intf, const struct usb_device_id *id)
 			msecs_to_jiffies(10000));
 		}
 
-		mc_phone_active_irq_enable(1);
+		mc_phone_active_irq_enable();
 
 		printk(KERN_INFO "usb %s, set autosuspend_delay 500,",
 				"pm_runtime_work after 10000\n", __func__);
@@ -1259,34 +1278,23 @@ static void usbsvn_disconnect(struct usb_interface *intf)
 
 	ppdev = usbdev->dev.parent->parent;
 	pm_runtime_forbid(ppdev); /*ehci*/
-	usb_put_dev(usbdev);
 
 	if (svn->dev_count == 0) {
+		usb_put_dev(usbdev);
 		svn->usbdev = NULL;
 
-		mc_phone_active_irq_enable(0);
+		skb_queue_purge(&svn->tx_skb_queue);
 
 		cancel_delayed_work_sync(&svn->pm_runtime_work);
 		cancel_work_sync(&svn->post_resume_work);
 		if (!svn->driver_info) {
-			/*TODO:check the Phone ACTIVE pin*/
-#if 0
-			if (mc_is_modem_active()) {
-				printk(KERN_INFO "%s try_reconnect_work\n", __func__);
-				svn->reconnect_cnt = 3;
-				schedule_delayed_work(&svn->try_reconnect_work,	10);
-			}
-#else
-#ifdef AIRPLAIN_MODE_TEST
-			if ((lte_airplain_mode == 0) && (modemctl_shutdown_flag == 0)) {
-#else
-			if (modemctl_shutdown_flag == 0) {
-#endif
+			if (mc_is_modem_active() && lte_silent_reset_mode == 0 &&
+					lte_airplain_mode == 0 && modemctl_shutdown_flag == 0) {
 				printk(KERN_INFO "%s try_reconnect_work\n", __func__);
 				svn->reconnect_cnt = 5;
 				schedule_delayed_work(&svn->try_reconnect_work,	50);
 			}
-#endif
+
 			wake_unlock_pm(svn);
 		}
 	}
@@ -1425,6 +1433,10 @@ static int usbsvn_notifier_event(struct notifier_block *this,
 		svn->dpm_suspending = 0;
 		if (svn->usbsvn_connected)
 			schedule_work(&svn->post_resume_work);
+		else { 
+			if (!lte_airplain_mode)
+				crash_event(1);
+		}
 		return NOTIFY_OK;
 	}
 	return NOTIFY_DONE;

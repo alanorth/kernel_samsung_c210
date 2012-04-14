@@ -5,7 +5,6 @@ obj-$(CONFIG_VIDEO_FIMG2D)	+= fimg2d_android/
 obj-$(CONFIG_VIDEO_MFC5X)	+= mfc5x/
 obj-$(CONFIG_VIDEO_MALI400MP)	+= mali/
 obj-$(CONFIG_VIDEO_UMP)		+= ump/
-obj-$(CONFIG_VIDEO_MHL_V1)	+= mhl_v1/
 
 EXTRA_CFLAGS += -Idrivers/media/video
 

@@ -218,6 +218,9 @@ static const struct s5k5ccgx_regs reg_datas = {
 	.af_night_normal_mode =
 		S5K5CCGX_REGSET_TABLE(s5k5ccgx_af_night_normal_on),
 #endif
+#ifdef CONFIG_VIDEO_S5K5CCGX_P4W
+	.af_off = S5K5CCGX_REGSET_TABLE(s5k5ccgx_af_off_reg),
+#endif
 	.hd_af_start = S5K5CCGX_REGSET_TABLE(s5k5ccgx_720P_af_do),
 	.hd_first_af_start = S5K5CCGX_REGSET_TABLE(s5k5ccgx_1st_720P_af_do),
 	.single_af_start = S5K5CCGX_REGSET_TABLE(s5k5ccgx_af_do),
@@ -234,14 +237,11 @@ static const struct s5k5ccgx_regs reg_datas = {
 	.get_ae_stable = S5K5CCGX_REGSET_TABLE(s5k5ccgx_get_ae_stable_reg),
 	.get_shutterspeed =
 		S5K5CCGX_REGSET_TABLE(s5k5ccgx_get_shutterspeed_reg),
-	.update_preview_setting =
-		S5K5CCGX_REGSET_TABLE(s5k5ccgx_update_preview_setting),
+	.update_preview = S5K5CCGX_REGSET_TABLE(s5k5ccgx_update_preview_reg),
+	.update_hd_preview =
+		S5K5CCGX_REGSET_TABLE(s5k5ccgx_update_hd_preview_reg),
 #ifdef CONFIG_VIDEO_S5K5CCGX_P8
 	.antibanding = S5K5CCGX_REGSET_TABLE(S5K5CCGX_ANTIBANDING_REG),
-#endif
-#ifdef DEBUG_FILTER_DATA
-	/* for debugging AF fail in HD lowlight. */
-	.get_filter_data = S5K5CCGX_REGSET_TABLE(s5k5ccgx_get_filter_data_reg),
 #endif
 };
 
@@ -825,22 +825,46 @@ static int s5k5ccgx_set_from_table(struct v4l2_subdev *sd,
 /* PX: */
 static inline int s5k5ccgx_save_ctrl(struct v4l2_control *ctrl)
 {
+	int ctrl_cnt = ARRAY_SIZE(s5k5ccgx_ctrls);
 	int i;
 
 	/* cam_trace("E, Ctrl-ID = 0x%X", ctrl->id);*/
 
-	for (i = 0; i < ARRAY_SIZE(s5k5ccgx_ctrls); i++) {
+	for (i = 0; i < ctrl_cnt; i++) {
 		if (ctrl->id == s5k5ccgx_ctrls[i].id) {
 			s5k5ccgx_ctrls[i].value = ctrl->value;
-			return 0;
+			break;
 		}
 	}
 
-	return -ENOIOCTLCMD;
+	if (unlikely(i >= ctrl_cnt))
+		cam_trace("WARNING, not saved ctrl-ID=0x%X\n", ctrl->id);
+
+	return 0;
 }
 
-/* PX: Contro Flash LED */
-static inline int s5k5ccgx_flash_en(struct v4l2_subdev *sd, s32 mode, s32 onoff)
+/**
+ * s5k5ccgx_is_hwflash_on - check whether flash device is on
+ *
+ * Refer to state->flash_on to check whether flash is in use in driver.
+ */
+static inline int s5k5ccgx_is_hwflash_on(struct v4l2_subdev *sd)
+{
+	struct s5k5ccgx_state *state = to_state(sd);
+
+#ifdef S5K5CCGX_SUPPORT_FLASH
+	return state->pdata->is_flash_on();
+#else
+	return 0;
+#endif
+}
+
+/**
+ * s5k5ccgx_flash_en - contro Flash LED
+ * @mode: S5K5CCGX_FLASH_MODE_NORMAL or S5K5CCGX_FLASH_MODE_MOVIE
+ * @onoff: S5K5CCGX_FLASH_ON or S5K5CCGX_FLASH_OFF
+ */
+static int s5k5ccgx_flash_en(struct v4l2_subdev *sd, s32 mode, s32 onoff)
 {
 	struct s5k5ccgx_state *state = to_state(sd);
 
@@ -849,7 +873,46 @@ static inline int s5k5ccgx_flash_en(struct v4l2_subdev *sd, s32 mode, s32 onoff)
 		return 0;
 	}
 
+#ifdef S5K5CCGX_SUPPORT_FLASH
 	return state->pdata->flash_en(mode, onoff);
+#endif
+	return 0;
+}
+
+/**
+ * s5k5ccgx_flash_torch - turn flash on/off as torch for preflash, recording
+ * @onoff: S5K5CCGX_FLASH_ON or S5K5CCGX_FLASH_OFF
+ *
+ * This func set state->flash_on properly.
+ */
+static inline int s5k5ccgx_flash_torch(struct v4l2_subdev *sd, s32 onoff)
+{
+	struct s5k5ccgx_state *state = to_state(sd);
+	int err = 0;
+
+	err = s5k5ccgx_flash_en(sd, S5K5CCGX_FLASH_MODE_MOVIE, onoff);
+	state->flash_on = (onoff == S5K5CCGX_FLASH_ON) ? 1 : 0;
+
+	return err;
+}
+
+/**
+ * s5k5ccgx_flash_oneshot - turn main flash on for capture
+ * @onoff: S5K5CCGX_FLASH_ON or S5K5CCGX_FLASH_OFF
+ *
+ * Main flash is turn off automatically in some milliseconds.
+ */
+static inline int s5k5ccgx_flash_oneshot(struct v4l2_subdev *sd, s32 onoff)
+{
+	struct s5k5ccgx_state *state = to_state(sd);
+	int err = 0;
+
+	err = s5k5ccgx_flash_en(sd, S5K5CCGX_FLASH_MODE_NORMAL, onoff);
+
+	/* The flash_on here is only used for EXIF */
+	state->flash_on = (onoff == S5K5CCGX_FLASH_ON) ? 1 : 0;
+
+	return err;
 }
 
 /* PX: Set scene mode */
@@ -948,12 +1011,12 @@ static int s5k5ccgx_set_capture_size(struct v4l2_subdev *sd)
 #else
 	int err = -EINVAL;
 
-	if (likely(!state->wide_mode))
+	if (likely(!state->wide_cmd))
 		return 0;
 
 	cam_err("%s: WARNING, reconfiguring sensor register.\n\n", __func__);
 
-	switch (state->wide_mode) {
+	switch (state->wide_cmd) {
 	case WIDE_REQ_CHANGE:
 		cam_info("%s: Wide Capture setting\n", __func__);
 		err = s5k5ccgx_set_from_table(sd, "change_wide_cap",
@@ -968,7 +1031,7 @@ static int s5k5ccgx_set_capture_size(struct v4l2_subdev *sd)
 
 	default:
 		cam_err("%s: WARNING, invalid argument(%d)\n",
-				__func__, state->wide_mode);
+				__func__, state->wide_cmd);
 		break;
 	}
 
@@ -1020,21 +1083,19 @@ static int s5k5ccgx_set_sensor_mode(struct v4l2_subdev *sd, s32 val)
 }
 
 /* PX: Set framerate */
-static int s5k5ccgx_set_frame_rate(struct v4l2_subdev *sd, u32 fps)
+static int s5k5ccgx_set_frame_rate(struct v4l2_subdev *sd, s32 fps)
 {
 	struct s5k5ccgx_state *state = to_state(sd);
 	int err = -EIO;
 	int i = 0, fps_index = -1;
 
-	if (state->hd_videomode)
-		return 0;
-
-	cam_info("set frame rate %d\n\n", fps);
+	cam_info("set frame rate %d\n", fps);
 
 	for (i = 0; i < ARRAY_SIZE(s5k5ccgx_framerates); i++) {
 		if (fps == s5k5ccgx_framerates[i].fps) {
 			fps_index = s5k5ccgx_framerates[i].index;
 			state->fps = fps;
+			state->req_fps = -1;
 			break;
 		}
 	}
@@ -1044,11 +1105,12 @@ static int s5k5ccgx_set_frame_rate(struct v4l2_subdev *sd, u32 fps)
 		return 0;
 	}
 
-	err = s5k5ccgx_set_from_table(sd, "fps",
-				state->regs->fps,
+	if (!state->hd_videomode) {
+		err = s5k5ccgx_set_from_table(sd, "fps", state->regs->fps,
 				ARRAY_SIZE(state->regs->fps), fps_index);
+		CHECK_ERR_N_MSG(err, "fail to set framerate\n")
+	}
 
-	CHECK_ERR_N_MSG(err, "fail to set framerate\n")
 	return 0;
 }
 
@@ -1150,6 +1212,23 @@ out_err:
 	return err;
 }
 
+#ifdef CONFIG_VIDEO_S5K5CCGX_P4W
+static int s5k5ccgx_set_af_softlanding(struct v4l2_subdev *sd)
+{
+	struct s5k5ccgx_state *state = to_state(sd);
+	int err = -EINVAL;
+
+	cam_trace("E\n");
+
+	err = s5k5ccgx_set_from_table(sd, "af_off",
+			&state->regs->af_off, 1, 0);
+	CHECK_ERR_N_MSG(err, "fail to set softlanding\n");
+
+	cam_trace("X\n");
+	return 0;
+}
+#endif
+
 /* PX: */
 static int s5k5ccgx_return_focus(struct v4l2_subdev *sd)
 {
@@ -1223,65 +1302,6 @@ static void __used s5k5ccgx_display_AF_win_info(struct v4l2_subdev *sd)
 		second_win.width, second_win.height);
 	cam_info("------- AF Window info -------\n\n");
 }
-
-#define DISPLAY_ROW_CNT		(16 + 10)
-#define DISPLAY_COL_CNT		8
-static void __used s5k5ccgx_display_filter_data(struct v4l2_subdev *sd)
-{
-	struct i2c_client *client = v4l2_get_subdevdata(sd);
-	struct s5k5ccgx_state *state = to_state(sd);
-	int err = -EIO;
-	u16 filter_buf[DISPLAY_ROW_CNT][DISPLAY_COL_CNT] = {{0,},};
-	u8 line_buf[128] = {0,};
-	u32 write_cnt = 0;
-	int i, j;
-
-	err = s5k5ccgx_set_from_table(sd, "get_filter_data",
-			&state->regs->get_filter_data, 1, 0);
-
-	s5k5ccgx_i2c_write_twobyte(client, 0x0028, 0x7000);
-
-	/* Lens reposition */
-	s5k5ccgx_i2c_write_twobyte(client, 0x002A, 0x0224);
-	s5k5ccgx_i2c_write_twobyte(client, 0x0F12, 0x0003);
-	debug_msleep(100);
-
-	/* Init: log count */
-	s5k5ccgx_i2c_write_twobyte(client, 0x002A, 0x1542);
-	s5k5ccgx_i2c_write_twobyte(client, 0x0F12, 0x0000);
-
-	/* Init: log clear */
-	s5k5ccgx_i2c_write_twobyte(client, 0x002A, 0x0224);
-	s5k5ccgx_i2c_write_twobyte(client, 0x0F12, 0x0003);
-	debug_msleep(100);
-
-	/* AF start */
-	s5k5ccgx_i2c_write_twobyte(client, 0x002A, 0x0224);
-	s5k5ccgx_i2c_write_twobyte(client, 0x0F12, 0x0005);
-	debug_msleep(2000); /* Sleep 2 second */
-
-	/* Start reading */
-	s5k5ccgx_i2c_write_twobyte(client, 0x002C, 0x7000);
-	s5k5ccgx_i2c_write_twobyte(client, 0x002E, 0x3000);
-	for (i = 0; i < DISPLAY_ROW_CNT; i++) {
-		for (j = 0; j < DISPLAY_COL_CNT; j++)
-			s5k5ccgx_i2c_read_twobyte(client, 0x0F12,
-					&filter_buf[i][j]);
-	}
-
-	cam_info("------- Display filter data -------\n");
-	for (i = 0; i < DISPLAY_ROW_CNT; i++) {
-		for (j = 0, write_cnt = 0; j < DISPLAY_COL_CNT; j++)
-			write_cnt += sprintf(line_buf+write_cnt, " %04X",
-					filter_buf[i][j]);
-
-		pr_info("%04X: %s\n", DISPLAY_ROW_CNT * i, line_buf);
-	}
-	cam_info("------- Display filter data -------\n\n");
-
-	/* Restore */
-	s5k5ccgx_i2c_write_twobyte(client, 0x0028, 0x7000);
-}
 #endif
 
 /* PX: Prepare AF Flash */
@@ -1325,9 +1345,7 @@ static int s5k5ccgx_af_start_preflash(struct v4l2_subdev *sd)
 			&state->regs->af_pre_flash_start, 1, 0);
 		s5k5ccgx_set_from_table(sd, "flash_ae_set",
 			&state->regs->flash_ae_set, 1, 0);
-		s5k5ccgx_flash_en(sd, S5K5CCGX_FLASH_MODE_MOVIE,
-			S5K5CCGX_FLASH_ON);
-		state->flash_on = 1;
+		s5k5ccgx_flash_torch(sd, S5K5CCGX_FLASH_ON);
 		state->focus.preflash = PREFLASH_ON;
 		break;
 
@@ -1345,12 +1363,12 @@ static int s5k5ccgx_af_start_preflash(struct v4l2_subdev *sd)
 	msleep(200);
 
 	/* Check AE-stable */
-	if (state->flash_on) {
+	if (state->focus.preflash == PREFLASH_ON) {
 		/* Do checking AE-stable */
 		for (count = 0; count < AE_STABLE_SEARCH_COUNT; count++) {
 			if (state->focus.start == AUTO_FOCUS_OFF) {
 				cam_info("af_start_preflash: \
-						AF is cancelled!\n");
+					AF is cancelled!\n");
 				state->focus.status = AF_RESULT_CANCELLED;
 				break;
 			}
@@ -1358,9 +1376,12 @@ static int s5k5ccgx_af_start_preflash(struct v4l2_subdev *sd)
 			s5k5ccgx_set_from_table(sd, "get_ae_stable",
 					&state->regs->get_ae_stable, 1, 0);
 			s5k5ccgx_i2c_read_twobyte(client, 0x0F12, &read_value);
-			if (read_value == 0x1) {
-				af_dbg("AE-stable=0x%X, count=%d",
-						read_value, count);
+
+			/* af_dbg("Check AE-Stable: 0x%04X\n", read_value); */
+			if (read_value == 0x0001) {
+				af_dbg("AE-stable success,"
+					" count=%d, delay=%dms\n", count,
+					state->one_frame_delay_ms);
 				break;
 			}
 
@@ -1371,7 +1392,9 @@ static int s5k5ccgx_af_start_preflash(struct v4l2_subdev *sd)
 		s5k5ccgx_i2c_write_twobyte(client, 0x0028, 0x7000);
 
 		if (unlikely(count >= AE_STABLE_SEARCH_COUNT)) {
-			cam_err("%s: ERROR, AE unstable\n\n", __func__);
+			cam_err("%s: ERROR, AE unstable."
+				" count=%d, delay=%dms\n",
+				__func__, count, state->one_frame_delay_ms);
 			/* return -ENODEV; */
 		}
 	} else if (state->focus.start == AUTO_FOCUS_OFF) {
@@ -1381,14 +1404,12 @@ static int s5k5ccgx_af_start_preflash(struct v4l2_subdev *sd)
 
 	/* If AF cancel, finish pre-flash process. */
 	if (state->focus.status == AF_RESULT_CANCELLED) {
-		if (state->flash_on) {
+		if (state->focus.preflash == PREFLASH_ON) {
 			s5k5ccgx_set_from_table(sd, "af_pre_flash_end",
 				&state->regs->af_pre_flash_end, 1, 0);
 			s5k5ccgx_set_from_table(sd, "flash_ae_clear",
 				&state->regs->flash_ae_clear, 1, 0);
-			s5k5ccgx_flash_en(sd, S5K5CCGX_FLASH_MODE_MOVIE,
-				S5K5CCGX_FLASH_OFF);
-			state->flash_on = 0;
+			s5k5ccgx_flash_torch(sd, S5K5CCGX_FLASH_OFF);
 			state->focus.preflash = PREFLASH_NONE;
 		}
 
@@ -1427,9 +1448,9 @@ static int s5k5ccgx_do_af(struct v4l2_subdev *sd)
 	if (state->hd_videomode)
 		msleep(100); /* 100ms */
 	else if (state->scene_mode == SCENE_MODE_NIGHTSHOT)
-		msleep(TWO_FRAME_DELAY_MS_NIGHTMODE);
+		msleep(ONE_FRAME_DELAY_MS_NIGHTMODE * 2); /* 330ms */
 	else
-		msleep(200); /* 200ms */
+		msleep(ONE_FRAME_DELAY_MS_LOW * 2); /* 200ms */
 
 	/* AF Searching */
 	cam_dbg("AF 1st search\n");
@@ -1507,24 +1528,22 @@ check_done:
 		cam_dbg("%s: Single AF finished\n", __func__);
 	}
 
-	if (state->flash_on && !state->hd_videomode) {
+	if ((state->focus.preflash == PREFLASH_ON) &&
+	    (state->sensor_mode == SENSOR_CAMERA)) {
 		s5k5ccgx_set_from_table(sd, "af_pre_flash_end",
 				&state->regs->af_pre_flash_end, 1, 0);
 		s5k5ccgx_set_from_table(sd, "flash_ae_clear",
 			&state->regs->flash_ae_clear, 1, 0);
-		s5k5ccgx_flash_en(sd, S5K5CCGX_FLASH_MODE_MOVIE,
-			S5K5CCGX_FLASH_OFF);
-		state->flash_on = 0;
+		s5k5ccgx_flash_torch(sd, S5K5CCGX_FLASH_OFF);
 		if (state->focus.status == AF_RESULT_CANCELLED) {
 			state->focus.preflash = PREFLASH_NONE;
 		}
 	}
 
-	/* Notice: we here turn off touch flag set when doing  Touch AF. */
+	/* Notice: we here turn touch flag off set previously
+	 * when doing Touch AF. */
 	if (state->focus.touch)
 		state->focus.touch = 0;
-
-	/* complete(&state->af_complete); */
 
 	return 0;
 }
@@ -1535,7 +1554,7 @@ static int s5k5ccgx_set_af(struct v4l2_subdev *sd, s32 val)
 	struct s5k5ccgx_state *state = to_state(sd);
 	int err = 0;
 
-	cam_info("%s: %s, focus mode %d\n\n\n", __func__,
+	cam_info("%s: %s, focus mode %d\n", __func__,
 			val ? "start" : "stop", state->focus.mode);
 
 	if (state->focus.start == val)
@@ -1552,7 +1571,7 @@ static int s5k5ccgx_set_af(struct v4l2_subdev *sd, s32 val)
 		/* state->focus.af_cancel = 0; */
 		state->focus.status = AF_RESULT_DOING;
 
-		if (!state->hd_videomode) {
+		if (state->sensor_mode == SENSOR_CAMERA) {
 			state->one_frame_delay_ms = ONE_FRAME_DELAY_MS_NORMAL;
 			err = s5k5ccgx_af_start_preflash(sd);
 			if (unlikely(err))
@@ -1614,6 +1633,7 @@ static int s5k5ccgx_stop_af(struct v4l2_subdev *sd, s32 touch)
 	}
 
 	if (!touch) {
+		/* We move lens to default position if af is cancelled.*/
 		err = s5k5ccgx_return_focus(sd);
 		if (unlikely(err)) {
 			cam_err("%s: ERROR, fail to af_norma_mode (%d)\n",
@@ -1906,15 +1926,24 @@ static int s5k5ccgx_init_regs(struct v4l2_subdev *sd)
 
 	s5k5ccgx_i2c_write_twobyte(client, 0x002E, 0x0150);
 	s5k5ccgx_i2c_read_twobyte(client, 0x0F12, &read_value);
-	cam_info("%s : FW ChipID  revision : %04X\n", __func__, read_value);
+	if (likely(read_value == S5K5CCGX_CHIP_ID))
+		cam_info("Sensor ChipID: 0x%04X\n", S5K5CCGX_CHIP_ID);
+	else
+		cam_info("Sensor ChipID: 0x%04X, unknown ChipID\n", read_value);
 
 	s5k5ccgx_i2c_write_twobyte(client, 0x002C, 0x7000);
 	s5k5ccgx_i2c_write_twobyte(client, 0x002E, 0x0152);
 	s5k5ccgx_i2c_read_twobyte(client, 0x0F12, &read_value);
-	cam_info("%s :FW EVT revision : %04X\n", __func__, read_value);
+	if (likely(read_value == S5K5CCGX_CHIP_REV))
+		cam_info("Sensor revision: 0x%04X\n", S5K5CCGX_CHIP_REV);
+	else
+		cam_info("Sensor revision: 0x%04X, unknown revision\n",
+				read_value);
 
 	/* restore write mode */
-	s5k5ccgx_i2c_write_twobyte(client, 0x0028, 0x7000);
+	err = s5k5ccgx_i2c_write_twobyte(client, 0x0028, 0x7000);
+	if (unlikely(err < 0))
+		return -ENODEV;
 
 	state->regs = &reg_datas;
 
@@ -1994,6 +2023,34 @@ static void s5k5ccgx_set_framesize(struct v4l2_subdev *sd,
 			(*found_frmsize)->index);
 }
 
+static int s5k5ccgx_wait_steamoff(struct v4l2_subdev *sd)
+{
+	struct s5k5ccgx_state *state = to_state(sd);
+	struct s5k5ccgx_stream_time *stream_time = &state->stream_time;
+	s32 elapsed_msec = 0;
+
+	cam_trace("E\n");
+
+	if (unlikely(!(state->pdata->is_mipi & state->need_wait_streamoff)))
+		return 0;
+
+	do_gettimeofday(&stream_time->curr_time);
+
+	elapsed_msec = GET_ELAPSED_TIME(stream_time->curr_time, \
+				stream_time->before_time) / 1000;
+
+	if (state->pdata->streamoff_delay > elapsed_msec) {
+		cam_info("stream-off: %dms + %dms\n", elapsed_msec,
+			state->pdata->streamoff_delay - elapsed_msec);
+		debug_msleep(state->pdata->streamoff_delay - elapsed_msec);
+	} else
+		cam_info("stream-off: %dms\n", elapsed_msec);
+
+	state->need_wait_streamoff = 0;
+
+	return 0;
+}
+
 static int s5k5ccgx_control_stream(struct v4l2_subdev *sd, u32 cmd)
 {
 	struct s5k5ccgx_state *state = to_state(sd);
@@ -2006,19 +2063,17 @@ static int s5k5ccgx_control_stream(struct v4l2_subdev *sd, u32 cmd)
 	err = s5k5ccgx_set_from_table(sd, "stream_stop",
 			&state->regs->stream_stop, 1, 0);
 
-	if (state->runmode == S5K5CCGX_RUNMODE_CAPTURING) {
-		if (state->flash_on) {
-			s5k5ccgx_flash_en(sd, S5K5CCGX_FLASH_MODE_NORMAL,
-				S5K5CCGX_FLASH_OFF);
-			state->flash_on = 0;
-		}
+#ifdef CONFIG_VIDEO_IMPROVE_STREAMOFF
+	do_gettimeofday(&state->stream_time.before_time);
+	state->need_wait_streamoff = 1;
+#else
+	debug_msleep(state->pdata->streamoff_delay);
+#endif
 
+	if (state->runmode == S5K5CCGX_RUNMODE_CAPTURING) {
 		state->runmode = S5K5CCGX_RUNMODE_CAPTURE_STOP;
 		cam_dbg("Capture Stop!\n");
 	}
-#ifndef CONFIG_VIDEO_IMPROVE_STREAMOFF
-	debug_msleep(state->pdata->streamoff_delay);
-#endif
 
 	CHECK_ERR_N_MSG(err, "failed to stop stream\n");
 	return 0;
@@ -2038,16 +2093,12 @@ static int s5k5ccgx_set_flash_mode(struct v4l2_subdev *sd, s32 val)
 		return 0;
 	}
 
-	if (val == FLASH_MODE_TORCH) {
-		s5k5ccgx_flash_en(sd, S5K5CCGX_FLASH_MODE_MOVIE,
-				S5K5CCGX_FLASH_ON);
-	}
+	if (val == FLASH_MODE_TORCH)
+		s5k5ccgx_flash_torch(sd, S5K5CCGX_FLASH_ON);
 
 	if ((state->flash_mode == FLASH_MODE_TORCH)
-	    && (val == FLASH_MODE_OFF)) {
-		s5k5ccgx_flash_en(sd, S5K5CCGX_FLASH_MODE_MOVIE,
-				S5K5CCGX_FLASH_OFF);
-	}
+	    && (val == FLASH_MODE_OFF))
+		s5k5ccgx_flash_torch(sd, S5K5CCGX_FLASH_OFF);
 
 	state->flash_mode = val;
 	cam_dbg("Flash mode = %d\n", val);
@@ -2070,12 +2121,12 @@ static int s5k5ccgx_check_esd(struct v4l2_subdev *sd)
 	if (read_value != 0xAAAA)
 		goto esd_out;
 
-	cam_trace("X, No ESD(val=0x%X)\n", read_value);
+	cam_info("Check ESD: not detected\n\n");
 	return 0;
 
 esd_out:
-	cam_err("%s: ESD Shock detected! (val=0x%X)\n\n\n",
-				__func__, read_value);
+	cam_err("Check ESD: ERROR, ESD Shock detected! (val=0x%X)\n\n",
+		read_value);
 	return -ERESTART;
 }
 
@@ -2175,23 +2226,28 @@ static int s5k5ccgx_get_exif(struct v4l2_subdev *sd)
 	struct s5k5ccgx_state *state = to_state(sd);
 	u32 exposure_time = 0;
 
-	state->exif.exp_time_den = 0;
-	state->exif.iso = 0;
-	state->exif.flash = 0;
-
 	/* exposure time */
+	state->exif.exp_time_den = 0;
 	s5k5ccgx_get_expousretime(sd, &exposure_time);
 	/*WARN(!exposure_time, "WARNING: exposure time is 0\n");*/
 	state->exif.exp_time_den = 1000 * 1000 / exposure_time;
 
 	/* iso */
+	state->exif.iso = 0;
 	s5k5ccgx_get_iso(sd, &state->exif.iso);
 
 	/* flash */
-	state->exif.flash = state->flash_on ? 0x1 : 0x0;
+	state->exif.flash = 0;
+	if (state->flash_mode == FLASH_MODE_AUTO)
+		state->exif.flash |= EXIF_FLASH_MODE_AUTO;
 
-	cam_dbg("%s: ex_time_den=%d, iso=%d\n", __func__,
-			state->exif.exp_time_den, state->exif.iso);
+	if (state->flash_on) {
+		state->exif.flash |= EXIF_FLASH_FIRED;
+		state->flash_on = 0;
+	}
+
+	cam_dbg("EXIF: ex_time_den=%d, iso=%d, flash=0x%02X\n",
+		state->exif.exp_time_den, state->exif.iso, state->exif.flash);
 
 	return 0;
 }
@@ -2201,9 +2257,9 @@ static int s5k5ccgx_set_preview_size(struct v4l2_subdev *sd)
 	struct s5k5ccgx_state *state = to_state(sd);
 	int err = -EINVAL;
 
-	cam_trace("E, wide_cmd=%d\n", state->wide_mode);
+	cam_trace("E, wide_cmd=%d\n", state->wide_cmd);
 
-	switch (state->wide_mode) {
+	switch (state->wide_cmd) {
 	case WIDE_REQ_CHANGE:
 		cam_info("%s: Wide Capture setting\n", __func__);
 		err = s5k5ccgx_set_from_table(sd, "change_wide_cap",
@@ -2253,16 +2309,20 @@ static int s5k5ccgx_set_preview_start(struct v4l2_subdev *sd)
 	}
 
 	if (state->runmode == S5K5CCGX_RUNMODE_CAPTURE_STOP) {
+		/* We turn flash off if one shot flash is still on. */
+		if (s5k5ccgx_is_hwflash_on(sd))
+			s5k5ccgx_flash_oneshot(sd, S5K5CCGX_FLASH_OFF);
+
 		err = s5k5ccgx_set_lock(sd, AEAWB_UNLOCK, true);
-		CHECK_ERR_N_MSG(err, "fail to set lock\n")
+		CHECK_ERR_N_MSG(err, "fail to set lock\n");
 
 		cam_info("Sending Preview_Return cmd\n");
 		err = s5k5ccgx_set_from_table(sd, "preview_return",
 					&state->regs->preview_return, 1, 0);
 		CHECK_ERR_N_MSG(err, "fail to set Preview_Return (%d)\n", err)
 	} else {
-		err = s5k5ccgx_set_from_table(sd, "update_preview_setting",
-			&state->regs->update_preview_setting, 1, 0);
+		err = s5k5ccgx_set_from_table(sd, "update_preview",
+			&state->regs->update_preview, 1, 0);
 		CHECK_ERR_N_MSG(err, "failed to update preview(%d)\n", err);
 	}
 
@@ -2287,10 +2347,11 @@ static int s5k5ccgx_set_video_preview(struct v4l2_subdev *sd)
 	state->focus.status = AF_RESULT_NONE;
 
 	if (state->hd_videomode) {
-		err = S5K5CCGX_BURST_WRITE_REGS(sd,
-			S5K5CCGX_720P_INIT_REG);
-		CHECK_ERR_N_MSG(err, "failed to write HD regs\n");
 		s5k5ccgx_init_param(sd);
+		err = s5k5ccgx_set_from_table(sd, "update_hd_preview",
+			&state->regs->update_hd_preview, 1, 0);
+		CHECK_ERR_N_MSG(err, "failed to update HD preview\n");
+
 		s5k5ccgx_set_from_table(sd, "hd_first_af_start",
 				&state->regs->hd_first_af_start, 1, 0);
 	} else {
@@ -2300,8 +2361,8 @@ static int s5k5ccgx_set_video_preview(struct v4l2_subdev *sd)
 				state->preview->index);
 		CHECK_ERR_N_MSG(err, "failed to set preview size\n");
 
-		err = s5k5ccgx_set_from_table(sd, "update_preview_setting",
-			&state->regs->update_preview_setting, 1, 0);
+		err = s5k5ccgx_set_from_table(sd, "update_preview",
+			&state->regs->update_preview, 1, 0);
 		CHECK_ERR_N_MSG(err, "failed to update preview\n");
 	}
 
@@ -2338,9 +2399,9 @@ static int s5k5ccgx_set_capture_start(struct v4l2_subdev *sd)
 		/* We do not break. */
 
 	case FLASH_MODE_ON:
-		s5k5ccgx_flash_en(sd, S5K5CCGX_FLASH_MODE_NORMAL,
-			S5K5CCGX_FLASH_ON);
-		state->flash_on = 1;
+		s5k5ccgx_flash_oneshot(sd, S5K5CCGX_FLASH_ON);
+		/* We here don't need to set state->flash_on to 1 */
+
 		/* Full flash start */
 		err = s5k5ccgx_set_from_table(sd, "flash_start",
 			&state->regs->flash_start, 1, 0);
@@ -2393,7 +2454,7 @@ static int s5k5ccgx_s_fmt(struct v4l2_subdev *sd, struct v4l2_format *fmt)
 
 	state->req_fmt = fmt->fmt.pix;
 	state->format_mode = fmt->fmt.pix.priv;
-	state->wide_mode = WIDE_REQ_NONE;
+	state->wide_cmd = WIDE_REQ_NONE;
 
 	if (state->format_mode != V4L2_PIX_FMT_MODE_CAPTURE) {
 		previous_index = state->preview ? state->preview->index : -1;
@@ -2412,11 +2473,11 @@ static int s5k5ccgx_s_fmt(struct v4l2_subdev *sd, struct v4l2_format *fmt)
 			if ((state->preview->index == PREVIEW_WIDE_SIZE)
 			    && (previous_index != PREVIEW_WIDE_SIZE)) {
 				cam_dbg("preview, need to change to WIDE\n");
-				state->wide_mode = WIDE_REQ_CHANGE;
+				state->wide_cmd = WIDE_REQ_CHANGE;
 			} else if ((state->preview->index != PREVIEW_WIDE_SIZE)
 			    && (previous_index == PREVIEW_WIDE_SIZE)) {
 				cam_dbg("preview, need to restore form WIDE\n");
-				state->wide_mode = WIDE_REQ_RESTORE;
+				state->wide_cmd = WIDE_REQ_RESTORE;
 			}
 
 			state->need_update_frmsize = 1;
@@ -2429,6 +2490,9 @@ static int s5k5ccgx_s_fmt(struct v4l2_subdev *sd, struct v4l2_format *fmt)
 		s5k5ccgx_set_framesize(sd, s5k5ccgx_capture_frmsizes,
 				ARRAY_SIZE(s5k5ccgx_capture_frmsizes),
 				false);
+
+		/* for maket app.
+		 * Samsung camera app does not use unmatched ratio.*/
 		if (unlikely(FRM_RATIO(state->preview)
 		    != FRM_RATIO(state->capture))) {
 			cam_warn("%s: WARNING, capture ratio " \
@@ -2436,10 +2500,10 @@ static int s5k5ccgx_s_fmt(struct v4l2_subdev *sd, struct v4l2_format *fmt)
 				__func__);
 			if (state->capture->index == CAPTURE_WIDE_SIZE) {
 				cam_dbg("captre: need to change to WIDE\n");
-				state->wide_mode = WIDE_REQ_CHANGE;
+				state->wide_cmd = WIDE_REQ_CHANGE;
 			} else {
 				cam_dbg("capture, need to restore form WIDE\n");
-				state->wide_mode = WIDE_REQ_RESTORE;
+				state->wide_cmd = WIDE_REQ_RESTORE;
 			}
 		}
 	}
@@ -2534,24 +2598,21 @@ static int s5k5ccgx_s_parm(struct v4l2_subdev *sd,
 	int err = 0;
 	struct s5k5ccgx_state *state = to_state(sd);
 
-	u32 fps = param->parm.capture.timeperframe.denominator /
+	state->req_fps = param->parm.capture.timeperframe.denominator /
 			param->parm.capture.timeperframe.numerator;
 
-	cam_trace("E fps=%d\n", fps);
+	cam_dbg("s_parm state->fps=%d, state->req_fps=%d\n",
+		state->fps, state->req_fps);
 
-	if (fps != state->fps) {
-		if (fps < 0 || fps > 30) {
-			cam_err("%s: ERROR, invalid frame rate %d\n",
-						__func__, fps);
-			fps = 30;
-		}
-		state->req_fps = fps;
+	if ((state->req_fps < 0) || (state->req_fps > 30)) {
+		cam_err("%s: ERROR, invalid frame rate %d. we'll set to 30\n",
+				__func__, state->req_fps);
+		state->req_fps = 30;
 	}
 
 	if (state->initialized && (state->scene_mode == SCENE_MODE_NONE)) {
 		err = s5k5ccgx_set_frame_rate(sd, state->req_fps);
 		CHECK_ERR(err);
-		state->fps = state->req_fps;
 	}
 
 	return 0;
@@ -2634,18 +2695,18 @@ static int s5k5ccgx_g_ctrl(struct v4l2_subdev *sd, struct v4l2_control *ctrl)
 static int s5k5ccgx_s_ctrl(struct v4l2_subdev *sd, struct v4l2_control *ctrl)
 {
 	struct s5k5ccgx_state *state = to_state(sd);
-	int err = 1; /* Don't fix err is 1. */
+	int err = -ENOIOCTLCMD;
 
 	if (unlikely(state->sensor_mode == SENSOR_MOVIE))
-		err = s5k5ccgx_save_ctrl(ctrl);
+		s5k5ccgx_save_ctrl(ctrl);
 
 	if (!state->initialized && ctrl->id != V4L2_CID_CAMERA_SENSOR_MODE) {
-		if (!err)
+		if (state->sensor_mode == SENSOR_MOVIE)
 			return 0;
 
-		cam_err("%s: WARNING, camera not initialized. ID = %d(0x%X)\n",
-				__func__, ctrl->id - V4L2_CID_PRIVATE_BASE,
-				ctrl->id - V4L2_CID_PRIVATE_BASE);
+		cam_warn("%s: WARNING, camera not initialized. ID = %d(0x%X)\n",
+			__func__, ctrl->id - V4L2_CID_PRIVATE_BASE,
+			ctrl->id - V4L2_CID_PRIVATE_BASE);
 		return 0;
 	}
 
@@ -2786,27 +2847,6 @@ static int s5k5ccgx_s_ext_ctrls(struct v4l2_subdev *sd,
 	return ret;
 }
 
-#ifdef CONFIG_VIDEO_S5K5CCGX_DEBUG
-static void s5k5ccgx_dump_regset(struct s5k5ccgx_regset *regset)
-{
-	if ((regset->data[0] == 0x00) && (regset->data[1] == 0x2A)) {
-		if (regset->size <= 6)
-			pr_err("odd regset size %d\n", regset->size);
-		pr_info("regset: addr = 0x%02X%02X, data[0,1] = 0x%02X%02X,"
-			" total data size = %d\n",
-			regset->data[2], regset->data[3],
-			regset->data[6], regset->data[7],
-			regset->size-6);
-	} else {
-		pr_info("regset: 0x%02X%02X%02X%02X\n",
-			regset->data[0], regset->data[1],
-			regset->data[2], regset->data[3]);
-		if (regset->size != 4)
-			pr_err("odd regset size %d\n", regset->size);
-	}
-}
-#endif
-
 static int s5k5ccgx_s_stream(struct v4l2_subdev *sd, int enable)
 {
 	struct s5k5ccgx_state *state = to_state(sd);
@@ -2841,16 +2881,20 @@ static int s5k5ccgx_s_stream(struct v4l2_subdev *sd, int enable)
 	case STREAM_MODE_MOVIE_ON:
 		state->recording = 1;
 		if (state->flash_mode != FLASH_MODE_OFF)
-			s5k5ccgx_flash_en(sd, S5K5CCGX_FLASH_MODE_MOVIE,
-			S5K5CCGX_FLASH_ON);
+			s5k5ccgx_flash_torch(sd, S5K5CCGX_FLASH_ON);
 		break;
 
 	case STREAM_MODE_MOVIE_OFF:
 		state->recording = 0;
-		s5k5ccgx_flash_en(sd, S5K5CCGX_FLASH_MODE_MOVIE,
-			S5K5CCGX_FLASH_OFF);
+		if (state->flash_on)
+			s5k5ccgx_flash_torch(sd, S5K5CCGX_FLASH_OFF);
 		break;
 
+#ifdef CONFIG_VIDEO_IMPROVE_STREAMOFF
+	case STREAM_MODE_WAIT_OFF:
+		s5k5ccgx_wait_steamoff(sd);
+		break;
+#endif
 	default:
 		cam_err("%s: ERROR - Invalid stream mode\n", __func__);
 		break;
@@ -2883,18 +2927,18 @@ static int s5k5ccgx_init(struct v4l2_subdev *sd, u32 val)
 	cam_dbg("%s: start\n", __func__);
 
 	err = s5k5ccgx_init_regs(sd);
-	CHECK_ERR_N_MSG(err, "fail to initialize camera device\n");
+	CHECK_ERR_N_MSG(err, "failed to indentify sensor chip\n");
 
-	if (state->hd_videomode)
+	if (state->hd_videomode) {
 		cam_info("HD(720p) mode\n");
-	else {
+		err = S5K5CCGX_BURST_WRITE_REGS(sd, s5k5ccgx_hd_init_reg);
+	} else
 		err = S5K5CCGX_BURST_WRITE_REGS(sd, s5k5ccgx_init_reg);
-		CHECK_ERR_N_MSG(err, "fail to init\n");
+	CHECK_ERR_N_MSG(err, "failed to initialize camera device\n");
 #ifdef CONFIG_VIDEO_S5K5CCGX_P8
-		s5k5ccgx_set_from_table(sd, "antibanding",
-				&state->regs->antibanding, 1, 0);
+	s5k5ccgx_set_from_table(sd, "antibanding",
+		&state->regs->antibanding, 1, 0);
 #endif
-	}
 
 	state->runmode = S5K5CCGX_RUNMODE_INIT;
 
@@ -2907,10 +2951,12 @@ static int s5k5ccgx_init(struct v4l2_subdev *sd, u32 val)
 
 	state->initialized = 1;
 
-	if ((state->sensor_mode == SENSOR_MOVIE) && !state->hd_videomode) {
+	if (state->sensor_mode == SENSOR_MOVIE)
 		s5k5ccgx_init_param(sd);
-		if (state->fps != state->req_fps)
-			err = s5k5ccgx_set_frame_rate(sd, state->req_fps);
+
+	if (state->req_fps >= 0) {
+		err = s5k5ccgx_set_frame_rate(sd, state->req_fps);
+		CHECK_ERR(err);
 	}
 
 	return 0;
@@ -2958,18 +3004,20 @@ static int s5k5ccgx_s_config(struct v4l2_subdev *sd,
 	else
 		state->freq = state->pdata->freq;
 
-	state->preview = NULL;
-	state->capture = NULL;
+	state->preview = state->capture = NULL;
 	state->sensor_mode = SENSOR_CAMERA;
 	state->hd_videomode = 0;
 	state->format_mode = V4L2_PIX_FMT_MODE_PREVIEW;
-	state->fps = state->req_fps = 0;
+	state->fps = 0;
+	state->req_fps = -1;
 
 	for (i = 0; i < ARRAY_SIZE(s5k5ccgx_ctrls); i++)
 		s5k5ccgx_ctrls[i].value = s5k5ccgx_ctrls[i].default_value;
 
-	if (state->pdata->is_flash_on())
+#ifdef S5K5CCGX_SUPPORT_FLASH
+	if (s5k5ccgx_is_hwflash_on(sd))
 		state->ignore_flash = 1;
+#endif
 
 #if !defined(FEATURE_YUV_CAPTURE)
 	state->jpeg.enable = 0;
@@ -3042,12 +3090,11 @@ static int s5k5ccgx_probe(struct i2c_client *client,
 	struct s5k5ccgx_state *state;
 
 	state = kzalloc(sizeof(struct s5k5ccgx_state), GFP_KERNEL);
-	if (state == NULL)
+	if (likely(state == NULL))
 		return -ENOMEM;
 
 	mutex_init(&state->ctrl_lock);
 	mutex_init(&state->af_lock);
-	init_completion(&state->af_complete);
 
 	state->runmode = S5K5CCGX_RUNMODE_NOTREADY;
 	sd = &state->sd;
@@ -3072,8 +3119,21 @@ static int s5k5ccgx_remove(struct i2c_client *client)
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 	struct s5k5ccgx_state *state = to_state(sd);
 
-	if (state->initialized)
+	/* for softlanding */
+	if (state->initialized) {
+#ifdef CONFIG_VIDEO_S5K5CCGX_P4W
+		s5k5ccgx_set_af_softlanding(sd);
+#else
 		s5k5ccgx_return_focus(sd);
+#endif
+	}
+
+	/* Check whether flash is on when unlolading driver,
+	 * to preventing Market App from controlling improperly flash.
+	 * It isn't necessary in case that you power flash down
+	 * in power routine to turn camera off.*/
+	if (unlikely(state->flash_on && !state->ignore_flash))
+		s5k5ccgx_flash_torch(sd, S5K5CCGX_FLASH_OFF);
 
 	device_remove_file(&client->dev, &dev_attr_camera_type);
 

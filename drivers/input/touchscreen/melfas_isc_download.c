@@ -99,7 +99,7 @@ void melfas_send_download_enable_command(void)
 //
 //============================================================
 
-int mms100_ISC_download_binary_data(int touch_id, INT8 dl_enable_bit)
+int mms100_ISC_download_binary_data(bool touch_id,INT8 dl_enable_bit)
 {
 
 	int nRet;

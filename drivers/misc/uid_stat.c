@@ -35,6 +35,8 @@ struct uid_stat {
 	uid_t uid;
 	atomic_t tcp_rcv;
 	atomic_t tcp_snd;
+	atomic_t tcp_rcv_rst;
+	atomic_t tcp_snd_rst;
 };
 
 static struct uid_stat *find_uid_stat(uid_t uid) {
@@ -88,6 +90,47 @@ static int tcp_rcv_read_proc(char *page, char **start, off_t off,
 	return len;
 }
 
+/* To support offload feature */
+static int tcp_rcv_rst_read_proc(char *page, char **start, off_t off,
+					int count, int *eof, void *data)
+{
+	int len;
+	unsigned int bytes;
+	char *p = page;
+	struct uid_stat *uid_entry = (struct uid_stat *) data;
+	if (!data)
+		return 0;
+
+	bytes = (unsigned int) (atomic_read(&uid_entry->tcp_rcv_rst) + INT_MIN);
+
+	p += sprintf(p, "%u\n", bytes);
+	len = (p - page) - off;
+	*eof = (len <= count) ? 1 : 0;
+	*start = page + off;
+	atomic_sub(bytes, &uid_entry->tcp_rcv_rst);
+	return len;
+}
+
+static int tcp_snd_rst_read_proc(char *page, char **start, off_t off,
+					int count, int *eof, void *data)
+{
+	int len;
+	unsigned int bytes;
+	char *p = page;
+	struct uid_stat *uid_entry = (struct uid_stat *) data;
+	if (!data)
+		return 0;
+
+	bytes = (unsigned int) (atomic_read(&uid_entry->tcp_snd_rst) + INT_MIN);
+
+	p += sprintf(p, "%u\n", bytes);
+	len = (p - page) - off;
+	*eof = (len <= count) ? 1 : 0;
+	*start = page + off;
+	atomic_sub(bytes, &uid_entry->tcp_snd_rst);
+	return len;
+}
+
 /* Create a new entry for tracking the specified uid. */
 static struct uid_stat *create_stat(uid_t uid) {
 	unsigned long flags;
@@ -104,6 +147,9 @@ static struct uid_stat *create_stat(uid_t uid) {
 	atomic_set(&new_uid->tcp_rcv, INT_MIN);
 	atomic_set(&new_uid->tcp_snd, INT_MIN);
 
+	atomic_set(&new_uid->tcp_rcv_rst, INT_MIN);
+	atomic_set(&new_uid->tcp_snd_rst, INT_MIN);
+
 	spin_lock_irqsave(&uid_lock, flags);
 	list_add_tail(&new_uid->link, &uid_list);
 	spin_unlock_irqrestore(&uid_lock, flags);
@@ -118,6 +164,12 @@ static struct uid_stat *create_stat(uid_t uid) {
 	create_proc_read_entry("tcp_rcv", S_IRUGO, entry, tcp_rcv_read_proc,
 		(void *) new_uid);
 
+	create_proc_read_entry("tcp_snd_rst", S_IRUGO|S_IWUGO, entry,
+		tcp_snd_rst_read_proc, (void *) new_uid);
+
+	create_proc_read_entry("tcp_rcv_rst", S_IRUGO|S_IWUGO, entry,
+		tcp_rcv_rst_read_proc, (void *) new_uid);
+
 	return new_uid;
 }
 
@@ -129,6 +181,7 @@ int uid_stat_tcp_snd(uid_t uid, int size) {
 			return -1;
 	}
 	atomic_add(size, &entry->tcp_snd);
+	atomic_add(size, &entry->tcp_snd_rst);
 	return 0;
 }
 
@@ -140,6 +193,7 @@ int uid_stat_tcp_rcv(uid_t uid, int size) {
 			return -1;
 	}
 	atomic_add(size, &entry->tcp_rcv);
+	atomic_add(size, &entry->tcp_rcv_rst);
 	return 0;
 }
 

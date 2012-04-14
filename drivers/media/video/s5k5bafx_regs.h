@@ -880,17 +880,17 @@ static const u32 s5k5bafx_common[] = {
 	0x0F120001,
 
 	/* Apply preview config */
-	0x002A021C,
-	0x0F120000,
-	0x002A0220,
-	0x0F120001,
-	0x002A01F8,
-	0x0F120001,
-	0x002A021E,
-	0x0F120001,
-	0x002A01F0,
-	0x0F120001,
-	0x0F120001,
+	/* 0x002A021C, */
+	/* 0x0F120000, */
+	/* 0x002A0220, */
+	/* 0x0F120001, */
+	/* 0x002A01F8, */
+	/* 0x0F120001, */
+	/* 0x002A021E, */
+	/* 0x0F120001, */
+	/* 0x002A01F0, */
+	/* 0x0F120001, */
+	/* 0x0F120001, */
 
 	/* Capture Config 0 (1600x1200 fixed 8fps) */
 	0x002A0302,
@@ -3422,17 +3422,17 @@ static const u32 s5k5bafx_vt_common[] =
 	0x0F120001,
 	
 	/* Apply preview config */
-	0x002A021C,
-	0x0F120000,
-	0x002A0220,
-	0x0F120001,
-	0x002A01F8,
-	0x0F120001,
-	0x002A021E,
-	0x0F120001,
-	0x002A01F0,
-	0x0F120001,
-	0x0F120001,
+	/* 0x002A021C, */
+	/* 0x0F120000, */
+	/* 0x002A0220, */
+	/* 0x0F120001, */
+	/* 0x002A01F8, */
+	/* 0x0F120001, */
+	/* 0x002A021E, */
+	/* 0x0F120001, */
+	/* 0x002A01F0, */
+	/* 0x0F120001, */
+	/* 0x0F120001, */
 	
 	/* Set Capture Config */
 	/* Capture Config 0 (1600x1200 fixed 8fps) */
@@ -5977,17 +5977,17 @@ static const u32 s5k5bafx_vt_wifi_common[] =
 	0x0F120001,
 	
 	/* Apply preview config */
-	0x002A021C,
-	0x0F120000,
-	0x002A0220,
-	0x0F120001,
-	0x002A01F8,
-	0x0F120001,
-	0x002A021E,
-	0x0F120001,
-	0x002A01F0,
-	0x0F120001,
-	0x0F120001,
+	/* 0x002A021C, */
+	/* 0x0F120000, */
+	/* 0x002A0220, */
+	/* 0x0F120001, */
+	/* 0x002A01F8, */
+	/* 0x0F120001, */
+	/* 0x002A021E, */
+	/* 0x0F120001, */
+	/* 0x002A01F0, */
+	/* 0x0F120001, */
+	/* 0x0F120001, */
 	
 	/* Set Capture Config */
 	/* Capture Config 0 (1600x1200 fixed 15fps) */
@@ -7744,7 +7744,9 @@ static const u32 s5k5bafx_capture[] =
 	0x0F12000B,
 };
 
-#if defined(CONFIG_TARGET_LOCALE_KOR) || defined(CONFIG_TARGET_LOCALE_NAATT)
+#if defined(CONFIG_TARGET_LOCALE_KOR) || \
+	defined(CONFIG_TARGET_LOCALE_NAATT) || \
+	defined(CONFIG_MACH_P8LTE_REV00)
 static const u32 s5k5bafx_recording_60Hz_common[] = {
 	
 	/* recording 25fps Anti-Flicker 60Hz*/
@@ -8551,8 +8553,8 @@ static const u32 s5k5bafx_recording_60Hz_common[] = {
 	0x0F120001,
 	0x0F120000,
 	0x0F120000,
-	0x0F120190, /*-535-*/
-	0x0F120190, /*-29A-*/
+	0x0F1201A0, /*-535-*/
+	0x0F1201A0, /*-29A-*/
 	0x0F120000,
 	0x0F120000,
 	0x0F120000,
@@ -8593,17 +8595,17 @@ static const u32 s5k5bafx_recording_60Hz_common[] = {
 	0x0F120001,
 	
 	/* Apply preview config */
-	0x002A021C,
-	0x0F120000, /* REG_TC_GP_ActivePrevConfig */
-	0x002A0220,
-	0x0F120001, /* REG_TC_GP_PrevOpenAfterChange */
-	0x002A01F8,
-	0x0F120001, /* REG_TC_GP_NewConfigSync */
-	0x002A021E,
-	0x0F120001, /* REG_TC_GP_PrevConfigChanged */
-	0x002A01F0,
-	0x0F120001, /* REG_TC_GP_EnablePreview */
-	0x0F120001, /* REG_TC_GP_EnablePreviewChanged */
+	/* 0x002A021C, */
+	/* 0x0F120000, */ /* REG_TC_GP_ActivePrevConfig */
+	/* 0x002A0220, */
+	/* 0x0F120001, */ /* REG_TC_GP_PrevOpenAfterChange */
+	/* 0x002A01F8, */
+	/* 0x0F120001, */ /* REG_TC_GP_NewConfigSync */
+	/* 0x002A021E, */
+	/* 0x0F120001, */ /* REG_TC_GP_PrevConfigChanged */
+	/* 0x002A01F0, */
+	/* 0x0F120001, */ /* REG_TC_GP_EnablePreview */
+	/* 0x0F120001, */ /* REG_TC_GP_EnablePreviewChanged */
 	
 	
 	
@@ -11152,18 +11154,17 @@ static const u32 s5k5bafx_recording_50Hz_common[] = {
 	0x0F120001, /* REG_TC_OIF_CfgChanged  */
 	
 	/* Apply preview config */
-	0x002A021C,
-	0x0F120000, /* REG_TC_GP_ActivePrevConfig */
-	0x002A0220,
-	0x0F120001, /* REG_TC_GP_PrevOpenAfterChange */
-	0x002A01F8,
-	0x0F120001, /* REG_TC_GP_NewConfigSync */
-	0x002A021E,
-	0x0F120001, /* REG_TC_GP_PrevConfigChanged */
-	0x002A01F0,
-	0x0F120001, /* REG_TC_GP_EnablePreview */
-	0x0F120001, /* REG_TC_GP_EnablePreviewChanged */
-	
+	/* 0x002A021C, */
+	/* 0x0F120000, */ /* REG_TC_GP_ActivePrevConfig */
+	/* 0x002A0220, */
+	/* 0x0F120001, */ /* REG_TC_GP_PrevOpenAfterChange */
+	/* 0x002A01F8, */
+	/* 0x0F120001, */ /* REG_TC_GP_NewConfigSync */
+	/* 0x002A021E, */
+	/* 0x0F120001, */ /* REG_TC_GP_PrevConfigChanged */
+	/* 0x002A01F0, */
+	/* 0x0F120001, */ /* REG_TC_GP_EnablePreview */
+	/* 0x0F120001, */ /* REG_TC_GP_EnablePreviewChanged */
 	
 	
 	/* Set Capture Config */
@@ -13047,23 +13048,23 @@ static const u32 s5k5bafx_fps_7fix[] =
 	0x0F120535, /* 7fps */
 	0x0F120000,
 
-	0x002A021C,
-	0x0F120000, /* REG_TC_GP_ActivePrevConfig */
-	0x002A0220,
-	0x0F120001, /* REG_TC_GP_PrevOpenAfterChange */
-	0x002A01F8,
-	0x0F120001, /* REG_TC_GP_NewConfigSync */
-	0x002A021E,
-	0x0F120001, /* REG_TC_GP_PrevConfigChanged */
-	0x002A01F0,
-	0x0F120001, /* REG_TC_GP_EnablePreview */
-	0x0F120001, /* REG_TC_GP_EnablePreviewChanged */
+	/* 0x002A021C, */
+	/* 0x0F120000, *//* REG_TC_GP_ActivePrevConfig */
+	/* 0x002A0220, */
+	/* 0x0F120001, *//* REG_TC_GP_PrevOpenAfterChange */
+	/* 0x002A01F8, */
+	/* 0x0F120001, *//* REG_TC_GP_NewConfigSync */
+	/* 0x002A021E, */
+	/* 0x0F120001, *//* REG_TC_GP_PrevConfigChanged */
+	/* 0x002A01F0, */
+	/* 0x0F120001, *//* REG_TC_GP_EnablePreview */
+	/* 0x0F120001, *//* REG_TC_GP_EnablePreviewChanged */
 
-	0xffff0096, /* delay 150ms */
+	/* 0xffff0096, *//* delay 150ms */
 
-	0x0028D000, /* mipi */
-	0x002AB0CC,
-	0x0F12000B,
+	/* 0x0028D000, *//* mipi */
+	/* 0x002AB0CC, */
+	/* 0x0F12000B, */
 };
 
 static const u32 s5k5bafx_fps_10fix[] =
@@ -13079,24 +13080,6 @@ static const u32 s5k5bafx_fps_10fix[] =
 	0x002A0254,
 	0x0F1203E8, /* 10fps */
 	0x0F120000,
-
-	0x002A021C,
-	0x0F120000, /* REG_TC_GP_ActivePrevConfig */
-	0x002A0220,
-	0x0F120001, /* REG_TC_GP_PrevOpenAfterChange */
-	0x002A01F8,
-	0x0F120001, /* REG_TC_GP_NewConfigSync  */
-	0x002A021E,
-	0x0F120001, /* REG_TC_GP_PrevConfigChanged */
-	0x002A01F0,
-	0x0F120001, /* REG_TC_GP_EnablePreview */
-	0x0F120001, /* REG_TC_GP_EnablePreviewChanged  */
-
-	0xffff0096, /* delay 150ms */
-
-	0x0028D000, /* mipi */
-	0x002AB0CC,
-	0x0F12000B,
 };
 
 static const u32 s5k5bafx_fps_12fix[] =
@@ -13112,24 +13095,6 @@ static const u32 s5k5bafx_fps_12fix[] =
 	0x002A0254,
 	0x0F120341, /* 12fps */
 	0x0F120000,
-
-	0x002A021C,
-	0x0F120000, /* REG_TC_GP_ActivePrevConfig */
-	0x002A0220,
-	0x0F120001, /* REG_TC_GP_PrevOpenAfterChange */
-	0x002A01F8,
-	0x0F120001, /* REG_TC_GP_NewConfigSync */
-	0x002A021E,
-	0x0F120001, /* REG_TC_GP_PrevConfigChanged */
-	0x002A01F0,
-	0x0F120001, /* REG_TC_GP_EnablePreview */
-	0x0F120001, /* REG_TC_GP_EnablePreviewChanged */
-
-	0xffff0096, /* delay 150ms */
-
-	0x0028D000, /* mipi */
-	0x002AB0CC,
-	0x0F12000B,
 };
 
 static const u32 s5k5bafx_fps_15fix[] =
@@ -13145,24 +13110,6 @@ static const u32 s5k5bafx_fps_15fix[] =
 	0x002A0254,
 	0x0F12029A, /* 15fps*/
 	0x0F120000,
-
-	0x002A021C,
-	0x0F120000, /* REG_TC_GP_ActivePrevConfig */
-	0x002A0220,
-	0x0F120001, /* REG_TC_GP_PrevOpenAfterChange */
-	0x002A01F8,
-	0x0F120001, /* REG_TC_GP_NewConfigSync */
-	0x002A021E,
-	0x0F120001, /* REG_TC_GP_PrevConfigChanged */
-	0x002A01F0,
-	0x0F120001, /* REG_TC_GP_EnablePreview */
-	0x0F120001, /* REG_TC_GP_EnablePreviewChanged  */
-
-	0xffff0096, /* delay 150ms */
-
-	0x0028D000, /*mipi */
-	0x002AB0CC,
-	0x0F12000B,
 };
 
 static const u32 s5k5bafx_fps_25fix[] =
@@ -13178,24 +13125,6 @@ static const u32 s5k5bafx_fps_25fix[] =
 	0x002A0254,
 	0x0F120190, /* 15fps*/
 	0x0F120000,
-
-	0x002A021C,
-	0x0F120000, /* REG_TC_GP_ActivePrevConfig */
-	0x002A0220,
-	0x0F120001, /* REG_TC_GP_PrevOpenAfterChange */
-	0x002A01F8,
-	0x0F120001, /* REG_TC_GP_NewConfigSync */
-	0x002A021E,
-	0x0F120001, /* REG_TC_GP_PrevConfigChanged */
-	0x002A01F0,
-	0x0F120001, /* REG_TC_GP_EnablePreview */
-	0x0F120001, /* REG_TC_GP_EnablePreviewChanged  */
-
-	0xffff0096, /* delay 150ms */
-
-	0x0028D000, /*mipi */
-	0x002AB0CC,
-	0x0F12000B,
 };
 
 

@@ -44,6 +44,9 @@ static atomic_t host_clk_count = ATOMIC_INIT(0);
 static atomic_t host_phy_count = ATOMIC_INIT(0);
 #endif
 
+#if defined(CONFIG_FB_S3C_S6E8AB0)
+extern void set_dsim_hs_clk_toggle_count(void);
+#endif
 
 static void usb_clk_get(enum usb_clk_type clk_type)
 {
@@ -176,6 +179,12 @@ void otg_phy_init(void)
 	__raw_writel((__raw_readl(S3C_USBOTG_PHYTUNE)
 				& ~(0xf)) | (0xb), S3C_USBOTG_PHYTUNE);
 	udelay(10);
+#ifdef CONFIG_MACH_P8LTE_REV00
+	/* squelch threshold tune [13:11] (001 : +10%) */
+	__raw_writel((__raw_readl(S3C_USBOTG_PHYTUNE)
+				& ~(0x3800)) | (0x0800), S3C_USBOTG_PHYTUNE);
+#endif
+	udelay(10);
 }
 EXPORT_SYMBOL(otg_phy_init);
 
@@ -225,6 +234,10 @@ void usb_host_phy_init(void)
 	/*  Must be enable usbhost & usbotg clk  */
 	usb_clk_get(USBHOST_CLK);
 	usb_clk_get(USBOTG_CLK);
+
+#if defined(CONFIG_FB_S3C_S6E8AB0)
+	set_dsim_hs_clk_toggle_count();
+#endif
 
 	 /*
 	  * set XuhostOVERCUR to in-active by controlling ET6PUD[15:14]
@@ -288,13 +301,16 @@ int usb_host_phy_off(void)
 	if ((__raw_readl(S5P_USBHOST_PHY_CONTROL) & (0x1<<0))) {
 		usb_clk_get(USBOTG_CLK);
 
+#if defined(CONFIG_FB_S3C_S6E8AB0)
+		set_dsim_hs_clk_toggle_count();
+#endif
 		__raw_writel(__raw_readl(S3C_USBOTG_PHYPWR)
 			|(0x1<<7)|(0x1<<6), S3C_USBOTG_PHYPWR);
 		__raw_writel(__raw_readl(S5P_USBHOST_PHY_CONTROL)
 			&~(1<<0), S5P_USBHOST_PHY_CONTROL);
 
 		usb_clk_put(USBOTG_CLK);
-		usb_clk_put(USBHOST_CLK);        
+		usb_clk_put(USBHOST_CLK);
 		printk(KERN_DEBUG "USB_PM phy_off\n");
 	}
 	return 0;

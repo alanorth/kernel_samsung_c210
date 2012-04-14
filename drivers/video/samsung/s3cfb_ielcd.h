@@ -92,7 +92,8 @@ int s3c_ielcd_stop(void);
 
 
 int s3c_ielcd_init_global(struct s3cfb_global *ctrl);
-int s3c_ielcd_set_clock(struct s3cfb_global *ctrl);
+/*int s3c_ielcd_set_clock(struct s3cfb_global *ctrl);
+*/
 /*
 int s3c_ielcd_clk_enable(struct s3cfb_global *ctrl);
 */

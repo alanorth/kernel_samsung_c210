@@ -27,7 +27,6 @@
 /* #define CONFIG_CAM_DEBUG */
 /* #define CONFIG_CAM_TRACE*/ /* Enable it with CONFIG_CAM_DEBUG */
 /* #define CONFIG_CAM_AF_DEBUG *//* Enable it with CONFIG_CAM_DEBUG */
-/* #define DEBUG_FILTER_DATA */ /* for debugging AF fail in HD mode */
 /* #define DEBUG_WRITE_REGS */
 /***********************************/
 
@@ -311,10 +310,23 @@ struct s5k5ccgx_exif {
 	/*int ebv;*/		/* exposure bias */
 };
 
+/* EXIF - flash filed */
+#define EXIF_FLASH_FIRED		(0x01)
+#define EXIF_FLASH_MODE_AUTO		(0x03 << 3)
+
 struct s5k5ccgx_regset {
 	u32 size;
 	u8 *data;
 };
+
+struct s5k5ccgx_stream_time {
+	struct timeval curr_time;
+	struct timeval before_time;
+};
+
+#define GET_ELAPSED_TIME(cur, before) \
+		(((cur).tv_sec - (before).tv_sec) * USEC_PER_SEC \
+		+ ((cur).tv_usec - (before).tv_usec))
 
 #ifdef CONFIG_LOAD_FILE
 #define DEBUG_WRITE_REGS
@@ -406,6 +418,9 @@ struct s5k5ccgx_regs {
 #if !defined(CONFIG_VIDEO_S5K5CCGX_P2)
 	struct s5k5ccgx_regset_table af_night_normal_mode;
 #endif
+#ifdef CONFIG_VIDEO_S5K5CCGX_P4W
+	struct s5k5ccgx_regset_table af_off;
+#endif
 	struct s5k5ccgx_regset_table hd_af_start;
 	struct s5k5ccgx_regset_table hd_first_af_start;
 	struct s5k5ccgx_regset_table single_af_start;
@@ -415,20 +430,18 @@ struct s5k5ccgx_regs {
 	struct s5k5ccgx_regset_table get_iso;
 	struct s5k5ccgx_regset_table get_ae_stable;
 	struct s5k5ccgx_regset_table get_shutterspeed;
-	struct s5k5ccgx_regset_table update_preview_setting;
+	struct s5k5ccgx_regset_table update_preview;
+	struct s5k5ccgx_regset_table update_hd_preview;
 	struct s5k5ccgx_regset_table stream_stop;
 #ifdef CONFIG_VIDEO_S5K5CCGX_P8
 	struct s5k5ccgx_regset_table antibanding;
 #endif /* CONFIG_VIDEO_S5K5CCGX_P8 */
-#ifdef DEBUG_FILTER_DATA
-	struct s5k5ccgx_regset_table get_filter_data;
-#endif
 };
 
 struct s5k5ccgx_state {
 	struct s5k5ccgx_platform_data *pdata;
 	struct v4l2_subdev sd;
-	struct v4l2_pix_format req_fmt;		/* used */
+	struct v4l2_pix_format req_fmt;
 	struct s5k5ccgx_framesize *preview;
 	struct s5k5ccgx_framesize *capture;
 	struct s5k5ccgx_focus focus;
@@ -436,20 +449,23 @@ struct s5k5ccgx_state {
 #if !defined(FEATURE_YUV_CAPTURE)
 	struct s5k5ccgx_jpeg_param jpeg;
 #endif
+	struct s5k5ccgx_stream_time stream_time;
 	const struct s5k5ccgx_regs *regs;
 	struct mutex ctrl_lock;
 	struct mutex af_lock;
-	struct completion af_complete;
 	enum s5k5ccgx_runmode runmode;
 	enum v4l2_sensor_mode sensor_mode;
 	enum v4l2_pix_format_mode format_mode;
 	enum v4l2_flash_mode flash_mode;
 	enum v4l2_scene_mode scene_mode;
 	enum v4l2_wb_mode wb_mode;
-	enum wide_req_cmd wide_mode;
+
+	/* To switch from nornal ratio to wide ratio.*/
+	enum wide_req_cmd wide_cmd;
+
 	s32 vt_mode;
-	u32 req_fps;
-	u32 fps;
+	s32 req_fps;
+	s32 fps;
 	s32 freq;		/* MCLK in Hz */
 	u32 one_frame_delay_ms;
 #if !defined(CONFIG_VIDEO_S5K5CCGX_P2)
@@ -458,9 +474,10 @@ struct s5k5ccgx_state {
 	u32 recording:1;
 	u32 hd_videomode:1;
 	u32 flash_on:1;
-	u32 initialized:1;
 	u32 ignore_flash:1;
 	u32 need_update_frmsize:1;
+	u32 need_wait_streamoff:1;
+	u32 initialized:1;
 };
 
 static inline struct  s5k5ccgx_state *to_state(struct v4l2_subdev *sd)
@@ -474,36 +491,38 @@ static inline void debug_msleep(u32 msecs)
 	msleep(msecs);
 }
 
-#define FORMAT_FLAGS_COMPRESSED		0x3
-
+#if !defined(FEATURE_YUV_CAPTURE)
 /* JPEG MEMORY SIZE */
-//#define SENSOR_JPEG_SNAPSHOT_MEMSIZE	0x410580
 #define SENSOR_JPEG_OUTPUT_MAXSIZE	0x29999A /*2726298bytes, 2.6M */
 #define EXTRA_MEMSIZE			(0 * SZ_1K)
 #define SENSOR_JPEG_SNAPSHOT_MEMSIZE \
 	(((SENSOR_JPEG_OUTPUT_MAXSIZE + EXTRA_MEMSIZE  + SZ_16K-1) / SZ_16K) * SZ_16K)
+#endif
+
+/*********** Sensor specific ************/
+#define S5K5CCGX_CHIP_ID	0x05CC
+#define S5K5CCGX_CHIP_REV	0x0001
+
+#define FORMAT_FLAGS_COMPRESSED		0x3
 
 #define POLL_TIME_MS		10
 #define CAPTURE_POLL_TIME_MS    1000
 
 /* maximum time for one frame in norma light */
 #define ONE_FRAME_DELAY_MS_NORMAL		66
-/* maximum time for one frame in low light */
+/* maximum time for one frame in low light: minimum 10fps. */
 #define ONE_FRAME_DELAY_MS_LOW			100
-
-/* 6fps in night mode */
-#define ONE_FRAME_DELAY_MS_NIGHTMODE		(1000 / 6)
-#define TWO_FRAME_DELAY_MS_NIGHTMODE \
-			(ONE_FRAME_DELAY_MS_NIGHTMODE * 2)
+/* maximum time for one frame in night mode: 6fps */
+#define ONE_FRAME_DELAY_MS_NIGHTMODE		166
 
 /* level at or below which we need to enable flash when in auto mode */
 #ifdef CONFIG_VIDEO_S5K5CCGX_P2
-#define LOW_LIGHT_LEVEL		0x3A
-#else
-#define FLASH_LOW_LIGHT_LEVEL		70
-#ifdef CONFIG_VIDEO_S5K5CCGX_P8
+#define FLASH_LOW_LIGHT_LEVEL		0x3A
+#elif defined(CONFIG_VIDEO_S5K5CCGX_P8)
+#define FLASH_LOW_LIGHT_LEVEL		0x46 /* 70 */
 #define CAPTURE_LOW_LIGHT_LEVEL		0x20
-#endif
+#else
+#define FLASH_LOW_LIGHT_LEVEL		0x4A
 #endif /* CONFIG_VIDEO_S5K5CCGX_P2 */
 
 #define FIRST_AF_SEARCH_COUNT   80

@@ -95,8 +95,7 @@ static int fat12_ent_bread(struct super_block *sb, struct fat_entry *fatent,
 err_brelse:
 	brelse(bhs[0]);
 err:
-	printk(KERN_WARNING "FAT: FAT read failed (blocknr %llu)\n",
-		(llu)blocknr);
+	printk(KERN_WARNING "FAT: FAT read failed (blocknr %llu)\n", (llu)blocknr);
 	return -EIO;
 }
 

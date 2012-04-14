@@ -74,6 +74,7 @@ enum s5k5bafx_fps_index {
 	I_FPS_30,
 	I_FPS_MAX,
 };
+#define DEFAULT_FPS	15
 	
 struct s5k5bafx_framesize {
 	u32 width;
@@ -90,6 +91,16 @@ struct s5k5bafx_exif {
 	u32 shutter_speed;
 	u16 iso;
 };
+
+struct s5k5bafx_stream_time {
+	struct timeval curr_time;
+	struct timeval before_time;
+};
+
+#define GET_ELAPSED_TIME(cur, before) \
+		(((cur).tv_sec - (before).tv_sec) * USEC_PER_SEC \
+		+ ((cur).tv_usec - (before).tv_usec))
+
 
 #ifdef CONFIG_LOAD_FILE
 struct s5k5bafx_regset_table {
@@ -169,14 +180,17 @@ struct s5k5bafx_state {
 	struct s5k5bafx_framesize preview_frmsizes;
 	struct s5k5bafx_framesize capture_frmsizes;
 	struct s5k5bafx_exif exif;
+	struct s5k5bafx_stream_time stream_time;
+	const struct s5k5bafx_regs *regs;
+	struct mutex ctrl_lock;
 
 	enum v4l2_sensor_mode sensor_mode;
 	s32 vt_mode;
-	s32 check_dataline;
-	u32 req_fps;
-	u32 set_fps;
-	u32 initialized;
-	const struct s5k5bafx_regs *regs;
+	s32 req_fps;
+	s32 fps;
+	u32 check_dataline:1;
+	u32 need_wait_streamoff:1;
+	u32 initialized:1;
 };
 
 static inline struct s5k5bafx_state *to_state(struct v4l2_subdev *sd)
@@ -214,6 +228,8 @@ static s32 large_file;
 #endif
 
 /*********** Sensor specific ************/
+#define S5K5BAFX_CHIP_ID	0x05BA
+#define S5K5BAFX_CHIP_REV	0xA0
 /* #define S5K5BAFX_100MS_DELAY	0xAA55AA5F */
 /* #define S5K5BAFX_10MS_DELAY	0xAA55AA5E */
 #define S5K5BAFX_DELAY		0xFFFF0000

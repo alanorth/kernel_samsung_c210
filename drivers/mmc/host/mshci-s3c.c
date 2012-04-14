@@ -244,8 +244,9 @@ static void mshci_s3c_set_ios(struct mshci_host *host,
 	if (pdata->cfg_ddr) {
 		if (ios->bus_width == MMC_BUS_WIDTH_8_DDR ||
 			ios->bus_width == MMC_BUS_WIDTH_4_DDR )
-			pdata->cfg_ddr(ourhost->pdev, 1);
-		else
+			pdata->cfg_ddr(ourhost->pdev, 1 );
+		else if (ios->bus_width == MMC_BUS_WIDTH_8 ||
+			ios->bus_width == MMC_BUS_WIDTH_4)
 			pdata->cfg_ddr(ourhost->pdev, 0);
 	}
 #endif

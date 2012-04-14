@@ -85,7 +85,7 @@
 
 #define ID_BLOCK_SIZE			7
 
-#define DRIVER_FILTER
+/*#define DRIVER_FILTER*/
 
 #define MXT_STATE_INACTIVE		-1
 #define MXT_STATE_RELEASE		0
@@ -94,13 +94,27 @@
 
 #define MAX_USING_FINGER_NUM 10
 
-// Add for debugging
-//####################
-//#define FOR_DEBUGGING_TEST
-//#define FOR_DEBUGGING_TEST_JUMPLIMIT
-//#define FOR_DEBUGGING_TEST_DOWNLOADFW_BIN
-//#define ITDEV //hmink
-//####################
+/* touch booster */
+#define TOUCH_BOOSTER			1
+#define TOUCH_BOOSTER_TIME		3000
+#if TOUCH_BOOSTER
+#include <mach/cpufreq.h>
+#endif
+
+/* use sumsize in T57 register */
+#define USE_SUMSIZE			1
+#if USE_SUMSIZE
+#define MAX_SUMSIZE	40
+#define MAX_SINGLE_SUMSIZE		100
+#endif
+
+/* Add for debugging */
+/*####################*/
+/*#define FOR_DEBUGGING_TEST*/
+/*#define FOR_DEBUGGING_TEST_DOWNLOADFW_BIN*/
+/*#define ITDEV //hmink*/
+/*#define SHOW_COORDINATE*/
+/*####################*/
 
 #ifdef ITDEV
 static int driver_paused;//itdev
@@ -122,6 +136,7 @@ struct finger_info {
 	u16 w;
 	s8 state;
 	int16_t component;
+	u16 mcount;	/*add for debug*/
 };
 
 typedef struct
@@ -161,6 +176,7 @@ struct mxt_data {
 	u8 tchthr_charging;
 	u8 calcfg_batt_e;
 	u8 calcfg_charging_e;
+	u8 atchcalsthr_e;
 	u8 atchfrccalthr_e;
 	u8 atchfrccalratio_e;
 	u8 idlesyncsperx_batt;
@@ -169,10 +185,35 @@ struct mxt_data {
 	u8 actvsyncsperx_charging;
 	u8 idleacqint_batt;
 	u8 idleacqint_charging;
+	u8 actacqint_batt;
+	u8 actacqint_charging;
+	u8 xloclip_batt;
+	u8 xloclip_charging;
+	u8 xhiclip_batt;
+	u8 xhiclip_charging;
+	u8 yloclip_batt;
+	u8 yloclip_charging;
+	u8 yhiclip_batt;
+	u8 yhiclip_charging;
+	u8 xedgectrl_batt;
+	u8 xedgectrl_charging;
+	u8 xedgedist_batt;
+	u8 xedgedist_charging;
+	u8 yedgectrl_batt;
+	u8 yedgectrl_charging;
+	u8 yedgedist_batt;
+	u8 yedgedist_charging;
+	u8 tchhyst_batt;
+	u8 tchhyst_charging;
 	const u8 *t48_config_batt_e;
 	const u8 *t48_config_chrg_e;
-	const u8 *t56_config_e;
-	struct delayed_work  config_dwork;
+	struct delayed_work config_dwork;
+	struct delayed_work overflow_dwork;
+	struct delayed_work check_median_error_dwork;
+	struct delayed_work check_abnormal_palm_dwork;
+#if TOUCH_BOOSTER
+	struct delayed_work dvfs_dwork;
+#endif
 	void (*power_on)(void);
 	void (*power_off)(void);
 	void (*register_cb)(void *);
@@ -195,7 +236,43 @@ static u8 threshold;
 static int firm_status_data;
 static bool deepsleep;
 void Mxt_force_released(void);
-//static bool lock_status;
+static void mxt_ta_probe(int ta_status);
+static void report_input_data(struct mxt_data *data);
+
+/* add for protection code +*/
+static bool overflow_detected;
+static bool first_touch_detected;
+static bool palm_detected_check;
+static int config_dwork_flag;
+static int treat_median_error_status;
+static int tchcount_aft_median_error;
+static int count_abnormal_palm;
+static int count_overflow_detect;
+
+#define CNTLMTTCH_AFT_MEDIAN_ERROR	5
+#define LIMIT_ABNORMAL_PALM			2
+#define LIMIT_OVERFLOW_CNT			2
+
+#define TIME_FOR_RECALIBRATION		3	/*3 sec */
+#define TIME_FOR_RECONFIG				10	/*10 sec*/
+#define TIME_FOR_RECONFIG_ON_REPET	7	/*7 sec */
+#define TIME_FOR_RECONFIG_ON_BOOT	30	/*30 sec*/
+#define TIME_FOR_CHECK_MEDIAN_ERROR	2	/*2 sec*/
+#define TIME_FOR_CHK_ABNMAL_PALM		900	/*900 msec*/
+#define TIME_FOR_RECAL_ABNMAL_PALM	5	/*5 sec*/
+
+#define CAL_FROM_BOOTUP			0
+#define CAL_FROM_RESUME			1
+#define CAL_BEF_WORK_CALLED		2
+#define CAL_REP_WORK_CALLED		3
+#define CAL_AFT_WORK_CALLED		4
+/* add for protection code -*/
+
+#if TOUCH_BOOSTER
+static bool tsp_press_status;
+static bool touch_cpu_lock_status;
+static int cpu_lv = -1;
+#endif
 
 static int read_mem(struct mxt_data *data, u16 reg, u8 len, u8 *buf)
 {
@@ -321,6 +398,15 @@ static int init_write_config(struct mxt_data *data, u8 type, const u8 *cfg)
 	return ret;
 }
 
+static int change_config(struct mxt_data *data,
+			u16 reg, u8 offeset, u8 change_value)
+{
+	u8 value = 0;
+
+	value = change_value;
+	return write_mem(data, reg+offeset, 1, &value);
+}
+
 static u32 __devinit crc24(u32 crc, u8 byte1, u8 byte2)
 {
 	static const u32 crcpoly = 0x80001B;
@@ -357,32 +443,20 @@ static int __devinit calculate_infoblock_crc(struct mxt_data *data,
 	return 0;
 }
 
-/* mxt224E reconfigration */
-static void mxt_reconfigration_normal(struct work_struct *work)
+uint8_t calibrate_chip_e(void)
 {
-	int error, id;
-	u16 size;
-
-	struct mxt_data *data = container_of(work, struct mxt_data, config_dwork.work);
-	u16 obj_address = 0;
-	/*disable_irq(data->client->irq);*/
-
-	for (id = 0 ; id < MAX_USING_FINGER_NUM ; ++id) {
-		if ( data->fingers[id].state == MXT_STATE_INACTIVE )
-			continue;
-		schedule_delayed_work(&data->config_dwork, HZ*5);
-		printk("[TSP] touch pressed!! %s didn't execute!!\n", __func__);
-		/*enable_irq(data->client->irq);*/
-		return;
+	u8 cal_data = 1;
+	int ret = 0;
+	/* send calibration command to the chip */
+	ret = write_mem(copy_data,
+		copy_data->cmd_proc + CMD_CALIBRATE_OFFSET,
+		1, &cal_data);
+	/* set flag for calibration lockup
+	recovery if cal command was successful */
+	if (!ret) {
+		printk(KERN_DEBUG "[TSP] calibration success!!!\n");
 	}
-
-	get_object_info(data, GEN_ACQUISITIONCONFIG_T8, &size, &obj_address);
-	error = write_mem(data, obj_address+8, 1, &data->atchfrccalthr_e);
-	if (error < 0) printk(KERN_ERR "[TSP] %s, %d Error!!\n", __func__, __LINE__);
-	error = write_mem(data, obj_address+9, 1, &data->atchfrccalratio_e);
-	if (error < 0) printk(KERN_ERR "[TSP] %s, %d Error!!\n", __func__, __LINE__);
-	/*enable_irq(data->client->irq);*/
-	return;
+	return ret;
 }
 
 static unsigned int mxt_time_point;
@@ -458,63 +532,488 @@ uint8_t calibrate_chip(void)
 	return ret;
 }
 
-uint8_t calibrate_chip_e(void)
+static void treat_force_reset(struct mxt_data *data)
 {
-	u8 cal_data = 1;
-	int ret = 0;
-	/* send calibration command to the chip */
-	ret = write_mem(copy_data, copy_data->cmd_proc + CMD_CALIBRATE_OFFSET, 1, &cal_data);
-	/* set flag for calibration lockup recovery if cal command was successful */
-	if (!ret)
-	{
-		printk("[TSP] calibration success!!!\n");
+	u8 i;
+	u8 count = 0;
+	int error = 0;
+
+	printk(KERN_DEBUG "[TSP] %s execute !!\n", __func__);
+	/* release touch */
+	for (i = 0; i < data->num_fingers; i++) {
+		if (data->fingers[i].state == MXT_STATE_INACTIVE)
+			continue;
+		data->fingers[i].z = 0;
+		data->fingers[i].state = MXT_STATE_RELEASE;
+		count++;
 	}
-	return ret;
+	if (count)
+		report_input_data(data);
+
+	/* reset the touch IC. */
+	error = mxt_reset(data);
+	if (error < 0)
+		printk(KERN_ERR"[TSP]mxt_reset fail!!!\n");
+	else
+		msleep(MXT_RESET_TIME);
+}
+
+static void mxt_set_normal_config(struct mxt_data *data)
+{
+	u16 size;
+	u16 obj_address = 0;
+	int error = 0;
+	bool ta_status = 0;
+
+	printk(KERN_DEBUG "[TSP] %s execute !!\n", __func__);
+
+	get_object_info(data,
+		GEN_POWERCONFIG_T7, &size, &obj_address);
+	/* 1 :ACTVACQINT*/
+	error = change_config(data, obj_address, 1, 255);
+	/* 2 :ACTV2IDLETO*/
+	error |= change_config(data, obj_address, 2, 25);
+
+	get_object_info(data,
+		GEN_ACQUISITIONCONFIG_T8, &size, &obj_address);
+	/* 8:ATCHFRCCALTHR*/
+	error |= change_config(data, obj_address, 8, 50);
+	/* 9:ATCHFRCCALRATIO*/
+	error |= change_config(data, obj_address, 9, 0);
+
+	get_object_info(data,
+		TOUCH_MULTITOUCHSCREEN_T9, &size, &obj_address);
+	/* 31:TCHHYST */
+	error |= change_config(data, obj_address, 31, 15);
+
+	get_object_info(data,
+		PROCI_TOUCHSUPPRESSION_T42, &size, &obj_address);
+	/* 0:CTRL */
+	error |= change_config(data, obj_address, 0, 3);
+
+	get_object_info(data,
+		SPT_CTECONFIG_T46, &size, &obj_address);
+
+	data->read_ta_status(&ta_status);
+	if (ta_status) {
+		/* 2:IDLESYNCSPERX */
+		error |= change_config(data, obj_address,
+				2, data->idlesyncsperx_charging);
+		/* 3:ACTVSYNCSPERX */
+		error |= change_config(data, obj_address,
+				3, data->actvsyncsperx_charging);
+	} else {
+		/* 2:IDLESYNCSPERX */
+		error |= change_config(data, obj_address,
+				2, data->idlesyncsperx_batt);
+		/* 3:ACTVSYNCSPERX */
+		error |= change_config(data, obj_address,
+				3, data->actvsyncsperx_batt);
+	}
+
+	get_object_info(data,
+		PROCG_NOISESUPPRESSION_T48, &size, &obj_address);
+	/* 52:TCHHYST[0] */
+	error |= change_config(data, obj_address, 52, 15);
+
+	get_object_info(data,
+		SPT_GENERICDATA_T57, &size, &obj_address);
+	/* 0:SUMSIZE */
+	error |= change_config(data, obj_address, 0, 131);
+
+	if (error < 0)
+		printk(KERN_ERR "[TSP] ta_probe write config Error!!\n");
+}
+
+static void mxt_set_recovery_config(struct mxt_data *data)
+{
+	u16 size;
+	u16 obj_address = 0;
+	int error = 0;
+
+	printk(KERN_DEBUG "[TSP] %s execute !!\n", __func__);
+
+	get_object_info(data,
+		GEN_POWERCONFIG_T7, &size, &obj_address);
+	/* 1 :ACTVACQINT*/
+	error = change_config(data, obj_address, 1, 16);
+	/* 2 :ACTV2IDLETO*/
+	error |= change_config(data, obj_address, 2, 7);
+
+	get_object_info(data,
+		GEN_ACQUISITIONCONFIG_T8, &size, &obj_address);
+	/* 8:ATCHFRCCALTHR*/
+	error |= change_config(data, obj_address, 8, 8);
+	/* 9:ATCHFRCCALRATIO*/
+	error |= change_config(data, obj_address, 9, 136);
+
+	get_object_info(data,
+		TOUCH_MULTITOUCHSCREEN_T9, &size, &obj_address);
+	/* 31:TCHHYST */
+	error |= change_config(data, obj_address, 31, 0);
+
+	get_object_info(data,
+		PROCI_TOUCHSUPPRESSION_T42, &size, &obj_address);
+	/* 0:CTRL */
+	error |= change_config(data, obj_address, 0, 51);
+
+	get_object_info(data,
+		SPT_CTECONFIG_T46, &size, &obj_address);
+	/* 2:IDLESYNCSPERX */
+	error |= change_config(data, obj_address, 2, 34);
+	/* 3:ACTVSYNCSPERX */
+	error |= change_config(data, obj_address, 3, 34);
+
+	get_object_info(data,
+		PROCG_NOISESUPPRESSION_T48, &size, &obj_address);
+	/* 52:TCHHYST[0] */
+	error |= change_config(data, obj_address, 52, 5);
+
+	get_object_info(data,
+		SPT_GENERICDATA_T57, &size, &obj_address);
+	/* 0:SUMSIZE */
+	error |= change_config(data, obj_address, 0, 0);
+
+	if (error < 0)
+		printk(KERN_ERR "[TSP] %s write config Error!!\n"
+					, __func__);
+
+	count_overflow_detect = 0;
 }
 
 static void treat_error_status_e(void)
 {
 	bool ta_status = 0;
-	u8 value;
 	u16 size;
 	u16 obj_address = 0;
 	int error = 0;
+	struct mxt_data *data = copy_data;
 
-	copy_data->read_ta_status(&ta_status);
+	data->read_ta_status(&ta_status);
+
+	tchcount_aft_median_error = 0;
+	cancel_delayed_work(&data->check_median_error_dwork);
+	schedule_delayed_work(&data->check_median_error_dwork
+		, HZ*TIME_FOR_CHECK_MEDIAN_ERROR);
+
+	if (treat_median_error_status) {
+		printk(KERN_ERR "[TSP] Error status already treated\n");
+		return;
+	} else
+		treat_median_error_status = 1;
 
 	if (ta_status) {
-		printk(KERN_ERR "[TSP] Error status\n");
-		get_object_info(copy_data,
-			PROCG_NOISESUPPRESSION_T48, &size, &obj_address);
-		/* 3:BASEFREQ */
-		value = 5;
-		error = write_mem(copy_data, obj_address+3, 1, &value);
-		/* 10:NLGAIN*/
-		value = 96;
-		error |= write_mem(copy_data, obj_address+10, 1, &value);
-		/* 11:NLTHR*/
-		value = 30;
-		error |= write_mem(copy_data, obj_address+11, 1, &value);
-		/* 17:GCMAXADCSPERX */
-		value = 100;
-		error |= write_mem(copy_data, obj_address+17, 1, &value);
-		/* 34:BLEN[0] */
-		value = 80;
-		error |= write_mem(copy_data, obj_address+34, 1, &value);
-		/* 39:MOVFILTER[0] */
-		value = 0;
-		error |= write_mem(copy_data, obj_address+39, 1, &value);
-		/* 41:MRGHYST[0] */
-		value = 40;
-		error |= write_mem(copy_data, obj_address+41, 1, &value);
-		/* 42:MRGTHR[0] */
-		value = 50;
-		error |= write_mem(copy_data, obj_address+42, 1, &value);
+		printk(KERN_ERR "[TSP] Error status TA is[%d]\n", ta_status);
 
-		if (error)
+		get_object_info(data,
+			GEN_POWERCONFIG_T7, &size, &obj_address);
+		/* 1:ACTVACQINT */
+		error = change_config(data, obj_address, 1, 255);
+
+		get_object_info(data,
+			GEN_ACQUISITIONCONFIG_T8, &size, &obj_address);
+		/* 0:CHRGTIME */
+		error |= change_config(data, obj_address, 0, 64);
+		/* 8:ATCHFRCCALTHR*/
+		error |= change_config(data, obj_address, 8, 50);
+		/* 9:ATCHFRCCALRATIO*/
+		error |= change_config(data, obj_address, 9, 0);
+
+		get_object_info(data,
+			PROCI_TOUCHSUPPRESSION_T42, &size, &obj_address);
+		/* 0:CTRL */
+		error |= change_config(data, obj_address, 0, 3);
+
+		get_object_info(data,
+			SPT_CTECONFIG_T46, &size, &obj_address);
+		/* 2:IDLESYNCSPERX */
+		error |= change_config(data, obj_address, 2, 48);
+		/* 3:ACTVSYNCSPERX */
+		error |= change_config(data, obj_address, 3, 48);
+
+		get_object_info(data,
+			PROCG_NOISESUPPRESSION_T48, &size, &obj_address);
+		/* 2:CALCFG */
+		error |= change_config(data, obj_address, 2, 114);
+		/* 3:BASEFREQ */
+		error |= change_config(data, obj_address, 3, 15);
+		/* 8:MFFREQ[0] */
+		error |= change_config(data, obj_address, 8, 3);
+		/* 9:MFFREQ[1] */
+		error |= change_config(data, obj_address, 9, 5);
+		/* 10:NLGAIN*/
+		error |= change_config(data, obj_address, 10, 96);
+		/* 11:NLTHR*/
+		error |= change_config(data, obj_address, 11, 30);
+		/* 17:GCMAXADCSPERX */
+		error |= change_config(data, obj_address, 17, 100);
+		/* 34:BLEN[0] */
+		error |= change_config(data, obj_address, 34, 80);
+		/* 35:TCHTHR[0] */
+		error |= change_config(data, obj_address, 35, 40);
+		/* 36:TCHDI[0] */
+		error |= change_config(data, obj_address, 36, 2);
+		/* 39:MOVFILTER[0] */
+		error |= change_config(data, obj_address, 39, 65);
+		/* 41:MRGHYST[0] */
+		error |= change_config(data, obj_address, 41, 40);
+		/* 42:MRGTHR[0] */
+		error |= change_config(data, obj_address, 42, 50);
+		/* 43:XLOCLIP[0] */
+		error |= change_config(data, obj_address, 43, 5);
+		/* 44:XHICLIP[0] */
+		error |= change_config(data, obj_address, 44, 5);
+		/* 51:JUMPLIMIT[0] */
+		error |= change_config(data, obj_address, 51, 25);
+		/* 52:TCHHYST[0] */
+		error |= change_config(data, obj_address, 52, 15);
+
+		if (error < 0)
+			printk(KERN_ERR "[TSP] failed to write error status\n");
+	} else {
+		printk(KERN_ERR "[TSP] Error status TA is[%d]\n", ta_status);
+
+		get_object_info(data,
+			GEN_POWERCONFIG_T7, &size, &obj_address);
+		/* 1:ACTVACQINT */
+		error = change_config(data, obj_address, 1, 255);
+
+		get_object_info(data,
+			GEN_ACQUISITIONCONFIG_T8, &size, &obj_address);
+		/* 0:CHRGTIME */
+		error |= change_config(data, obj_address, 0, 64);
+		/* 8:ATCHFRCCALTHR*/
+		error |= change_config(data, obj_address, 8, 50);
+		/* 9:ATCHFRCCALRATIO*/
+		error |= change_config(data, obj_address, 9, 0);
+
+		get_object_info(data,
+			TOUCH_MULTITOUCHSCREEN_T9, &size, &obj_address);
+		/* 31:TCHHYST */
+		error |= change_config(data, obj_address, 31, 15);
+
+		get_object_info(data,
+			PROCI_TOUCHSUPPRESSION_T42, &size, &obj_address);
+		/* 0:CTRL */
+		error |= change_config(data, obj_address, 0, 3);
+
+		get_object_info(data,
+			SPT_CTECONFIG_T46, &size, &obj_address);
+		/* 2:IDLESYNCSPERX */
+		error |= change_config(data, obj_address, 2, 48);
+		/* 3:ACTVSYNCSPERX */
+		error |= change_config(data, obj_address, 3, 48);
+
+		get_object_info(data,
+			PROCG_NOISESUPPRESSION_T48, &size, &obj_address);
+		/* 2:CALCFG */
+		error |= change_config(data, obj_address, 2, 242);
+		/* 3:BASEFREQ */
+		error |= change_config(data, obj_address, 3, 15);
+		/* 8:MFFREQ[0] */
+		error |= change_config(data, obj_address, 8, 3);
+		/* 9:MFFREQ[1] */
+		error |= change_config(data, obj_address, 9, 5);
+		/* 10:NLGAIN*/
+		error |= change_config(data, obj_address, 10, 112);
+		/* 11:NLTHR*/
+		error |= change_config(data, obj_address, 11, 25);
+		/* 17:GCMAXADCSPERX */
+		error |= change_config(data, obj_address, 17, 100);
+		/* 34:BLEN[0] */
+		error |= change_config(data, obj_address, 34, 112);
+		/* 35:TCHTHR[0] */
+		error |= change_config(data, obj_address, 35, 40);
+		/* 41:MRGHYST[0] */
+		error |= change_config(data, obj_address, 41, 40);
+		/* 42:MRGTHR[0] */
+		error |= change_config(data, obj_address, 42, 50);
+		/* 51:JUMPLIMIT[0] */
+		error |= change_config(data, obj_address, 51, 25);
+		/* 52:TCHHYST[0] */
+		error |= change_config(data, obj_address, 52, 15);
+
+		if (error < 0)
 			printk(KERN_ERR "[TSP] failed to write error status\n");
 	}
 }
+
+/* this function is called in irq routine */
+static void treat_calibration_state(struct mxt_data *data)
+{
+	first_touch_detected = 0;
+	overflow_detected = 0;
+	palm_detected_check = 0;
+	count_abnormal_palm = 0;
+
+	cancel_delayed_work(&data->overflow_dwork);
+	cancel_delayed_work(&data->check_abnormal_palm_dwork);
+
+	 if (config_dwork_flag
+			== CAL_FROM_RESUME) {
+		config_dwork_flag = CAL_BEF_WORK_CALLED;
+	} else if (config_dwork_flag
+				== CAL_BEF_WORK_CALLED) {
+		cancel_delayed_work(&data->config_dwork);
+		schedule_delayed_work(&data->config_dwork
+			, HZ*TIME_FOR_RECONFIG);
+	} else if (config_dwork_flag
+				== CAL_REP_WORK_CALLED) {
+		cancel_delayed_work(&data->config_dwork);
+		schedule_delayed_work(&data->config_dwork
+			, HZ*TIME_FOR_RECONFIG_ON_REPET);
+	} else if (config_dwork_flag
+				== CAL_AFT_WORK_CALLED) {
+		mxt_set_recovery_config(data);
+		config_dwork_flag = CAL_BEF_WORK_CALLED;
+		schedule_delayed_work(&data->config_dwork
+			, HZ*TIME_FOR_RECONFIG);
+	}
+}
+
+/* mxt224E reconfigration */
+static void mxt_reconfigration_normal(struct work_struct *work)
+{
+	struct mxt_data *data =
+		container_of(work, struct mxt_data, config_dwork.work);
+
+	if (mxt_enabled) {
+		disable_irq(data->client->irq);
+
+		if (first_touch_detected && !overflow_detected) {
+			mxt_set_normal_config(data);
+			config_dwork_flag = CAL_AFT_WORK_CALLED;
+		} else {
+			cancel_delayed_work(&data->config_dwork);
+			schedule_delayed_work(&data->config_dwork
+				, HZ*TIME_FOR_RECONFIG_ON_REPET);
+			config_dwork_flag = CAL_REP_WORK_CALLED;
+		}
+
+		enable_irq(data->client->irq);
+	}
+	return;
+}
+
+static void mxt_calbration_by_overflowed(struct work_struct *work)
+{
+	struct mxt_data *data =
+		container_of(work, struct mxt_data, overflow_dwork.work);
+	u8 id;
+	int error = 0;
+	u8 count = 0;
+	bool ta_status = 0;
+
+	if (mxt_enabled) {
+		disable_irq(data->client->irq);
+		printk(KERN_DEBUG "[TSP] %s execute [%s][%d]\n",
+			__func__ , (overflow_detected == 1) ? "T" : "F",
+			count_overflow_detect);
+
+		if (overflow_detected) {
+			for (id = 0 ; id < MAX_USING_FINGER_NUM ; ++id) {
+				if (data->fingers[id].state
+					== MXT_STATE_INACTIVE)
+					continue;
+
+				if (data->fingers[id].mcount > 10) {
+					overflow_detected = 0;
+					enable_irq(data->client->irq);
+					return;
+				}
+			}
+
+			if (!first_touch_detected)
+				count_overflow_detect++;
+
+			if (count_overflow_detect
+					>= LIMIT_OVERFLOW_CNT) {
+				count_overflow_detect = 0;
+				treat_force_reset(data);
+				enable_irq(data->client->irq);
+
+				if (data->read_ta_status) {
+					data->read_ta_status(&ta_status);
+					printk(KERN_DEBUG
+					"[TSP] ta_status is %d\n", ta_status);
+					mxt_ta_probe(ta_status);
+				}
+			} else {
+				calibrate_chip_e();
+				enable_irq(data->client->irq);
+			}
+		}
+	}
+}
+
+static void mxt_check_medianfilter_error(struct work_struct *work)
+{
+	printk(KERN_DEBUG "[TSP] %s [%d]\n",
+		__func__, tchcount_aft_median_error);
+
+	if (tchcount_aft_median_error
+		>= CNTLMTTCH_AFT_MEDIAN_ERROR) {
+		calibrate_chip_e();
+	}
+	tchcount_aft_median_error = 0;
+}
+
+static void mxt_check_abnormal_palm(struct work_struct *work)
+{
+	struct mxt_data *data =
+		container_of(work,
+		struct mxt_data, check_abnormal_palm_dwork.work);
+
+	if (mxt_enabled) {
+		disable_irq(data->client->irq);
+		if (palm_detected_check) {
+			if (count_abnormal_palm >= LIMIT_ABNORMAL_PALM) {
+				count_abnormal_palm = 0;
+				calibrate_chip_e();
+			} else {
+				/* to check palm is keep going or not */
+				schedule_delayed_work(
+					&data->check_abnormal_palm_dwork,
+					HZ*TIME_FOR_RECAL_ABNMAL_PALM);
+			}
+		} else {
+			if (count_abnormal_palm == 1) {
+				printk(KERN_DEBUG
+					"[TSP] calibration for palm\n");
+				calibrate_chip_e();
+			}
+		}
+		palm_detected_check = 0;
+		enable_irq(data->client->irq);
+	}
+}
+
+#if TOUCH_BOOSTER
+static void mxt_set_dvfs_off(struct work_struct *work)
+{
+	struct mxt_data *data =
+		container_of(work, struct mxt_data, dvfs_dwork.work);
+
+	if (mxt_enabled) {
+		disable_irq(data->client->irq);
+		if (touch_cpu_lock_status
+			&& !tsp_press_status){
+			s5pv310_cpufreq_lock_free(DVFS_LOCK_ID_TSP);
+			touch_cpu_lock_status = 0;
+		}
+		enable_irq(data->client->irq);
+	}
+}
+
+static void mxt_set_dvfs_on(struct mxt_data *data)
+{
+	cancel_delayed_work(&data->dvfs_dwork);
+	if (cpu_lv < 0)
+		cpu_lv =	s5pv310_cpufreq_round_idx(CPUFREQ_500MHZ);
+	s5pv310_cpufreq_lock(DVFS_LOCK_ID_TSP, cpu_lv);
+	touch_cpu_lock_status = 1;
+}
+#endif
 
 static int check_abs_time(void)
 {
@@ -700,53 +1199,6 @@ void check_chip_calibration(void)
 	}
 }
 
-static void shieldless_init(struct mxt_data *data)
-{
-	u16 t56_address = 0;
-	u16 t38_address = 0;
-
-	u16 size;
-	u8 value;
-	u8 *temp;
-
-	int error;
-	int ret;
-	u8 msg[data->msg_object_size];
-
-	get_object_info(data, SPT_USERDATA_T38, &size, &t38_address);
-
-	read_mem(data, t38_address + 63 , 1, &value);
-
-	printk(KERN_ERR"[TSP] shieldless_init is %#02x\n", value);
-	if (value != 0xA5) {
-		/* Clear All T56 memory */
-		get_object_info(data, PROCI_SHIELDLESS_T56,
-							&size, &t56_address);
-		temp = kmalloc(size * sizeof(u8), GFP_KERNEL);
-		memset(temp, 0, size);
-		ret |= write_mem(data, t56_address, size, temp);
-		kfree(temp);
-
-		/* Init T56 Config */
-		ret = init_write_config(data, data->t56_config_e[0],
-							data->t56_config_e + 1);
-
-		/* T6 -> Backup to NV memory */
-		ret = mxt_backup(data);
-		msleep(50);
-
-		/* T6 -> Reset */
-		ret = mxt_reset(data);
-		msleep(500);
-
-		value = 0xA5;
-		error = write_mem(data, t38_address+63, 1, &value);
-	} else {
-		ret = init_write_config(data, data->t56_config_e[0],
-							data->t56_config_e + 1);
-	}
-}
-
 static void mxt_ta_probe(int ta_status)
 {
 	u16 obj_address = 0;
@@ -762,46 +1214,119 @@ static void mxt_ta_probe(int ta_status)
 	}
 
 	if (data->family_id == 0xA1) {	/* MXT-768E */
-		if (ta_status) {
-			get_object_info(data, GEN_POWERCONFIG_T7,
-							&size, &obj_address);
-			value = data->idleacqint_charging;
-			error = write_mem(data, obj_address, 1, &value);
 
-			/*get_object_info(data, GEN_ACQUISITIONCONFIG_T8,
-							&size, &obj_address);
-			value = data->chrgtime_charging;
-			error = write_mem(data, obj_address, 1, &value);*/
+		if (treat_median_error_status) {
+			treat_median_error_status = 0;
+			tchcount_aft_median_error = 0;
+		}
+		if (ta_status) {
+			get_object_info(data,
+				GEN_POWERCONFIG_T7, &size, &obj_address);
+			/* 0:IDLEACQINT */
+			error = change_config(data, obj_address,
+						0, data->idleacqint_charging);
+#if 0 /*it was setted in mxt_set_normal_config*/
+			/* 1:ACTVACQINT */
+			error |= change_config(data, obj_address,
+						1, data->actacqint_charging);
+#endif
+			get_object_info(data,
+				GEN_ACQUISITIONCONFIG_T8, &size, &obj_address);
+			/* 0:CHRGTIME */
+			error |= change_config(data, obj_address,
+						0, data->chrgtime_charging);
+
+			get_object_info(data,
+				TOUCH_MULTITOUCHSCREEN_T9, &size, &obj_address);
+			error |= change_config(data, obj_address,
+						22, data->xloclip_charging);
+			error |= change_config(data, obj_address,
+						23, data->xhiclip_charging);
+			error |= change_config(data, obj_address,
+						24, data->yloclip_charging);
+			error |= change_config(data, obj_address,
+						25, data->yhiclip_charging);
+			error |= change_config(data, obj_address,
+						26, data->xedgectrl_charging);
+			error |= change_config(data, obj_address,
+						27, data->xedgedist_charging);
+			error |= change_config(data, obj_address,
+						28, data->yedgectrl_charging);
+			error |= change_config(data, obj_address,
+						29, data->yedgedist_charging);
 
 			error |= write_config(data, data->t48_config_chrg_e[0],
 						data->t48_config_chrg_e + 1);
-
-			get_object_info(data, SPT_CTECONFIG_T46, &size, &obj_address);
-			value = data->idlesyncsperx_charging;
-			error = write_mem(data, obj_address+2, 1, &value);
-			value = data->actvsyncsperx_charging;
-			error = write_mem(data, obj_address+3, 1, &value);
+#if 0 /*it was setted in mxt_set_normal_config*/
+			get_object_info(data,
+				SPT_CTECONFIG_T46, &size, &obj_address);
+			/* 2:IDLESYNCSPERX */
+			error |= change_config(data, obj_address,
+					2, data->idlesyncsperx_charging);
+			/* 3:ACTVSYNCSPERX */
+			error |= change_config(data, obj_address,
+					3, data->actvsyncsperx_charging);
+#endif
 			threshold = data->tchthr_charging;
-		} else {
-			get_object_info(data, GEN_POWERCONFIG_T7,
-							&size, &obj_address);
-			value = data->idleacqint_batt;
-			error = write_mem(data, obj_address, 1, &value);
 
-			/*get_object_info(data, GEN_ACQUISITIONCONFIG_T8,
-							&size, &obj_address);
-			value = data->chrgtime_batt;
-			error = write_mem(data, obj_address, 1, &value);*/
+			if (error < 0)
+				printk(KERN_ERR "[TSP] ta_probe write config Error!!\n");
+		} else {
+			get_object_info(data,
+				GEN_POWERCONFIG_T7, &size, &obj_address);
+			/* 0:IDLEACQINT */
+			error = change_config(data, obj_address,
+					0, data->idleacqint_batt);
+#if 0 /*it was setted in mxt_set_normal_config*/
+			/* 1:ACTVACQINT */
+			error |= change_config(data, obj_address,
+					1, data->actacqint_batt);
+#endif
+			get_object_info(data,
+				GEN_ACQUISITIONCONFIG_T8, &size, &obj_address);
+			/* 0:CHRGTIME */
+			error |= change_config(data, obj_address,
+					0, data->chrgtime_batt);
+
+			get_object_info(data,
+				TOUCH_MULTITOUCHSCREEN_T9, &size, &obj_address);
+			error |= change_config(data, obj_address,
+						7, data->tchthr_batt);
+			error |= change_config(data, obj_address,
+						22, data->xloclip_batt);
+			error |= change_config(data, obj_address,
+						23, data->xhiclip_batt);
+			error |= change_config(data, obj_address,
+						24, data->yloclip_batt);
+			error |= change_config(data, obj_address,
+						25, data->yhiclip_batt);
+			error |= change_config(data, obj_address,
+						26, data->xedgectrl_batt);
+			error |= change_config(data, obj_address,
+						27, data->xedgedist_batt);
+			error |= change_config(data, obj_address,
+						28, data->yedgectrl_batt);
+			error |= change_config(data, obj_address,
+						29, data->yedgedist_batt);
+			error |= change_config(data, obj_address,
+						31, data->tchhyst_batt);
 
 			error |= write_config(data, data->t48_config_batt_e[0],
 						data->t48_config_batt_e + 1);
-
-			get_object_info(data, SPT_CTECONFIG_T46, &size, &obj_address);
-			value = data->idlesyncsperx_batt;
-			error = write_mem(data, obj_address+2, 1, &value);
-			value = data->actvsyncsperx_batt;
-			error = write_mem(data, obj_address+3, 1, &value);
+#if 0 /*it was setted in mxt_set_normal_config*/
+			get_object_info(data,
+				SPT_CTECONFIG_T46, &size, &obj_address);
+			/* 2:IDLESYNCSPERX */
+			error |= change_config(data, obj_address,
+						2, data->idlesyncsperx_batt);
+			/* 3:ACTVSYNCSPERX */
+			error |= change_config(data, obj_address,
+						3, data->actvsyncsperx_batt);
+#endif
 			threshold = data->tchthr_batt;
+
+			if (error < 0)
+				printk(KERN_ERR "[TSP] ta_probe write config Error!!\n");
 		}
 	}
 	else if (data->family_id == 0x81) {	/*  : MXT-224E */
@@ -1023,15 +1548,6 @@ static int __devinit mxt_init_touch_driver(struct mxt_data *data)
 					&data->cmd_proc);
 	if (ret)
 		goto err;
-#if 0
-	if (data->family_id == 0xA1) {
-		get_object_info(data, PROCG_NOISESUPPRESSION_T48, &size, &obj_address);
-		value = 2;
-		ret = write_mem(data, obj_address, 1, &value);
-		if (ret < 0)
-			printk(KERN_ERR "[TSP] mxt TA/USB mxt_noise_suppression_config Error!!\n");
-	}
-#endif
 	return 0;
 
 err:
@@ -1043,6 +1559,9 @@ static void report_input_data(struct mxt_data *data)
 {
 	int i;
 	int count = 0;
+	int report_count = 0;
+	int press_count = 0;
+	int move_count = 0;
 
 	for (i = 0; i < data->num_fingers; i++) {
 		if (data->fingers[i].state == MXT_STATE_INACTIVE)
@@ -1062,28 +1581,63 @@ static void report_input_data(struct mxt_data *data)
 		#endif
 
 		input_mt_sync(data->input_dev);
-//#if defined(CONFIG_SAMSUNG_KERNEL_DEBUG_USER)
+		report_count++;
+
+#ifdef SHOW_COORDINATE
 		if (data->fingers[i].state == MXT_STATE_PRESS || data->fingers[i].state == MXT_STATE_RELEASE) {
-			printk(KERN_DEBUG "[TSP] id[%d],x=%d,y=%d,z=%d,w=%d\n",
-				i , data->fingers[i].x, data->fingers[i].y, data->fingers[i].z, data->fingers[i].w);
-//#endif
+			printk(KERN_DEBUG "[TSP] id[%d],x=%d,y=%d,z=%d,w=%d,mc=%d\n",
+				i , data->fingers[i].x, data->fingers[i].y
+				, data->fingers[i].z, data->fingers[i].w
+				, data->fingers[i].mcount);
 		}
+#else
+		if (data->fingers[i].state == MXT_STATE_PRESS)
+			printk(KERN_DEBUG "[TSP] P: id[%d],w=%d\n"
+				, i, data->fingers[i].w);
+		else if (data->fingers[i].state == MXT_STATE_RELEASE)
+			printk(KERN_DEBUG "[TSP] R: id[%d],mc=%d\n"
+				, i, data->fingers[i].mcount);
+#endif
+		if (treat_median_error_status) {
+			if (data->fingers[i].state == MXT_STATE_RELEASE
+				|| data->fingers[i].state == MXT_STATE_PRESS) {
+				tchcount_aft_median_error++;
+				if (tchcount_aft_median_error > 100)
+					tchcount_aft_median_error = 0;
+			}
+		} else
+			tchcount_aft_median_error = 0;
+
 		if (data->fingers[i].state == MXT_STATE_RELEASE) {
 			data->fingers[i].state = MXT_STATE_INACTIVE;
+			data->fingers[i].mcount = 0;
 		}
 		else {
 			data->fingers[i].state = MXT_STATE_MOVE;
 			count++;
 		}
 	}
+	if (report_count > 0) {
 #ifdef ITDEV
-	if (!driver_paused)//itdev
+		if (!driver_paused)
 #endif
-	input_sync(data->input_dev);
+			input_sync(data->input_dev);
+	}
 
 	if (count) touch_is_pressed = 1;
 	else touch_is_pressed = 0;
 
+#if TOUCH_BOOSTER
+	if (count == 0) {
+		if (touch_cpu_lock_status) {
+			cancel_delayed_work(&data->dvfs_dwork);
+			schedule_delayed_work(&data->dvfs_dwork,
+				msecs_to_jiffies(TOUCH_BOOSTER_TIME));
+		}
+		tsp_press_status = 0;
+	} else
+		tsp_press_status = 1;
+#endif
 	data->finger_mask = 0;
 }
 
@@ -1098,12 +1652,21 @@ static irqreturn_t mxt_irq_thread(int irq, void *ptr)
 	u8 value;
 	int error;
 	u8 object_type, instance;
+#if USE_SUMSIZE
+	uint16_t sum_size = 0;
+#endif
 
 	do {
 		touch_message_flag = 0;
-		if (read_mem(data, data->msg_proc, sizeof(msg), msg))
+		if (read_mem(data, data->msg_proc, sizeof(msg), msg)) {
+#if TOUCH_BOOSTER
+			if (touch_cpu_lock_status) {
+				s5pv310_cpufreq_lock_free(DVFS_LOCK_ID_TSP);
+				touch_cpu_lock_status = 0;
+			}
+#endif
 			return IRQ_HANDLED;
-
+		}
 #ifdef ITDEV//itdev
 	    if (debug_enabled)
 	        print_hex_dump(KERN_DEBUG, "MXT MSG:", DUMP_PREFIX_NONE, 16, 1, msg, sizeof(msg), false);
@@ -1126,7 +1689,9 @@ static irqreturn_t mxt_irq_thread(int irq, void *ptr)
 			}
 			if ((msg[1]&0x10) == 0x10) /* calibration */
 			{
-				printk("[TSP] calibration is on going\n");
+				printk(KERN_DEBUG "[TSP] calibration is"
+					" on going !!\n");
+				treat_calibration_state(data);
 			}
 			if ((msg[1]&0x20) == 0x20) /* signal error */
 			{
@@ -1135,6 +1700,10 @@ static irqreturn_t mxt_irq_thread(int irq, void *ptr)
 			if ((msg[1]&0x40) == 0x40) /* overflow */
 			{
 				printk("[TSP] overflow detected\n");
+				overflow_detected = 1;
+				cancel_delayed_work(&data->overflow_dwork);
+				schedule_delayed_work(&data->overflow_dwork
+					, HZ*TIME_FOR_RECALIBRATION);
 			}
 			if ((msg[1]&0x80) == 0x80) /* reset */
 			{
@@ -1143,18 +1712,45 @@ static irqreturn_t mxt_irq_thread(int irq, void *ptr)
 		}
 
 		if (object_type == PROCI_TOUCHSUPPRESSION_T42) {
-			if ((msg[1] & 0x01) == 0x00) { /* Palm release */
-				printk("[TSP] palm touch released\n");
+			get_object_info(data, GEN_ACQUISITIONCONFIG_T8,
+							&size, &obj_address);
+			if ((msg[1] & 0x01) == 0x00) {
+				/* Palm release */
+				printk(KERN_DEBUG "[TSP] palm touch released\n");
+				if (palm_detected_check)
+					count_abnormal_palm++;
+				 else
+					count_abnormal_palm = 0;
+
 				touch_is_pressed = 0;
-			} else if ((msg[1] & 0x01) == 0x01) { /* Palm Press */
-				printk("[TSP] palm touch detected\n");
+			} else if ((msg[1] & 0x01) == 0x01) {
+				/* Palm Press */
+				printk(KERN_DEBUG "[TSP] palm touch detected\n");
+				if (!palm_detected_check) {
+					count_abnormal_palm = 1;
+					palm_detected_check = 1;
+					cancel_delayed_work(
+					&data->check_abnormal_palm_dwork);
+					schedule_delayed_work(
+					&data->check_abnormal_palm_dwork,
+					msecs_to_jiffies(
+						TIME_FOR_CHK_ABNMAL_PALM));
+				} else
+					count_abnormal_palm++;
+
 				touch_is_pressed = 1;
 				touch_message_flag = 1;
 			}
 		}
 
 		if (object_type == PROCG_NOISESUPPRESSION_T48) {
+			/* printk(KERN_ERR "[TSP] T48 [STATUS]:%#02x"
+				"[ADCSPERX]:%#02x[FRQ]:%#02x"
+				"[STATE]:%#02x[NLEVEL]:%#02x\n"
+				, msg[1], msg[2], msg[3], msg[4], msg[5]);*/
+
 			if (msg[4] == 5) { /* Median filter error */
+				printk(KERN_ERR "[TSP] Median filter error\n");
 				if ((data->family_id == 0xA1)
 					&& ((data->tsp_version == 0x13)
 					|| (data->tsp_version == 0x20))) {
@@ -1171,6 +1767,13 @@ static irqreturn_t mxt_irq_thread(int irq, void *ptr)
 				}
 			}
 		}
+
+#if USE_SUMSIZE
+		if (object_type == SPT_GENERICDATA_T57) {
+			sum_size = msg[1];
+			sum_size +=  (msg[2]<<8);
+		}
+#endif
 
 		if (object_type == TOUCH_MULTITOUCHSCREEN_T9) {
 			id = msg[0] - data->finger_type;
@@ -1197,6 +1800,10 @@ static irqreturn_t mxt_irq_thread(int irq, void *ptr)
 				data->fingers[id].state = MXT_STATE_RELEASE;
 			} else if ((msg[1] & DETECT_MSG_MASK) && (msg[1] &
 					(PRESS_MSG_MASK | MOVE_MSG_MASK))) {
+#if TOUCH_BOOSTER
+				if (!touch_cpu_lock_status)
+					mxt_set_dvfs_on(data);
+#endif
 				touch_message_flag = 1;
 				data->fingers[id].z = msg[6];
 				data->fingers[id].w = msg[5];
@@ -1205,15 +1812,25 @@ static irqreturn_t mxt_irq_thread(int irq, void *ptr)
 				data->fingers[id].x = (((msg[2] << 4) | (msg[4] >> 4)) >> data->x_dropbits);
 				data->fingers[id].y = (((msg[3] << 4) | (msg[4] & 0xF)) >> data->y_dropbits);
 				data->finger_mask |= 1U << id;
-#if defined(DRIVER_FILTER)
+
 				if (msg[1] & PRESS_MSG_MASK) {
+#if defined(DRIVER_FILTER)
 					equalize_coordinate(1, id, &data->fingers[id].x, &data->fingers[id].y);
+#endif
 					data->fingers[id].state = MXT_STATE_PRESS;
+					data->fingers[id].mcount = 0;
+
+					if (!first_touch_detected) {
+						first_touch_detected = 1;
+						count_overflow_detect = 0;
+					}
 				}
 				else if (msg[1] & MOVE_MSG_MASK) {
+#if defined(DRIVER_FILTER)
 					equalize_coordinate(0, id, &data->fingers[id].x, &data->fingers[id].y);
-				}
 #endif
+					data->fingers[id].mcount += 1;
+				}
 				#ifdef _SUPPORT_SHAPE_TOUCH_
 					data->fingers[id].component= msg[7];
 				#endif
@@ -1230,9 +1847,44 @@ static irqreturn_t mxt_irq_thread(int irq, void *ptr)
 		}
 	} while (!gpio_get_value(data->gpio_read_done));
 
-	if (data->finger_mask)
-		report_input_data(data);
+	if (data->finger_mask) {
+#if USE_SUMSIZE
+		if (sum_size > 0) {
+			/* case of normal configuration */
+			u8 num_finger = 0;
+			u8 i;
+			uint16_t t9_sum_size = 0;
 
+			for (i = 0; i < data->num_fingers; i++) {
+				if (data->fingers[i].state == MXT_STATE_INACTIVE
+				|| data->fingers[i].state == MXT_STATE_RELEASE)
+					continue;
+				t9_sum_size += data->fingers[i].w;
+
+				num_finger++;
+			}
+
+			if ((num_finger == 1)
+				&& ((sum_size-t9_sum_size) >= MAX_SUMSIZE)) {
+				printk(KERN_DEBUG
+					"[TSP] recalibrate for max sumsize[%d]"
+					"t9_sum_size[%d]\n"
+					, sum_size, t9_sum_size);
+				calibrate_chip_e();
+			} else {
+				report_input_data(data);
+			}
+
+			t9_sum_size = 0;
+			sum_size = 0;
+		} else {
+			/* case of recovery configuration */
+			report_input_data(data);
+		}
+#else
+		report_input_data(data);
+#endif
+	}
 	if (data->family_id == 0x80) {	/*  : MXT-224 */
 		if (touch_message_flag && (cal_check_flag)) {
 			check_chip_calibration();
@@ -1260,6 +1912,9 @@ static int mxt_internal_suspend(struct mxt_data *data)
 
 	if (data->family_id == 0xA1) {	/*  : MXT-768E */
 		cancel_delayed_work(&data->config_dwork);
+		cancel_delayed_work(&data->overflow_dwork);
+		cancel_delayed_work(&data->check_median_error_dwork);
+		cancel_delayed_work(&data->check_abnormal_palm_dwork);
 	}
 	else if (data->family_id == 0x81) {	/*  : MXT-224E */
 		cancel_delayed_work(&data->config_dwork);
@@ -1275,6 +1930,14 @@ static int mxt_internal_suspend(struct mxt_data *data)
 	if (count)
 	report_input_data(data);
 
+#if TOUCH_BOOSTER
+	cancel_delayed_work(&data->dvfs_dwork);
+	tsp_press_status = 0;
+	if (touch_cpu_lock_status) {
+		s5pv310_cpufreq_lock_free(DVFS_LOCK_ID_TSP);
+		touch_cpu_lock_status = 0;
+	}
+#endif
 	/*if (!deepsleep) data->power_off();*/
 	data->power_off();
 
@@ -1298,23 +1961,10 @@ static void mxt_early_suspend(struct early_suspend *h)
 {
 	struct mxt_data *data = container_of(h, struct mxt_data,
 								early_suspend);
-	bool ta_status = 0;
-
 	if (mxt_enabled == 1) {
 		printk(KERN_DEBUG"[TSP] %s\n", __func__);
 		mxt_enabled = 0;
 		touch_is_pressed = 0;
-/*
-		if (data->read_ta_status) {
-			data->read_ta_status(&ta_status);
-			mxt_ta_probe(ta_status);
-		}
-
-		if (ta_status) {
-			mxt_deepsleep(data);
-		}
-*/
-		/*if (!deepsleep) disable_irq(data->client->irq);*/
 		disable_irq(data->client->irq);
 		mxt_internal_suspend(data);
 	} else
@@ -1340,9 +1990,15 @@ static void mxt_late_resume(struct early_suspend *h)
 			mxt_ta_probe(ta_status);
 		}
 
-		if (data->family_id == 0xA1) {	/*  : MXT-768E */
+		if (data->family_id == 0xA1) {/*  : MXT-768E */
+			config_dwork_flag = CAL_FROM_RESUME;
+			overflow_detected = 0;
+			first_touch_detected = 0;
+			treat_median_error_status = 0;
+			tchcount_aft_median_error = 0;
+			palm_detected_check = 0;
+			count_overflow_detect = 0;
 			calibrate_chip_e();
-			schedule_delayed_work(&data->config_dwork, HZ*5);
 		}
 		else if (data->family_id == 0x81) {	/*  : MXT-224E */
 			calibrate_chip_e();
@@ -1363,6 +2019,9 @@ static int mxt_suspend(struct device *dev)
 
 	mxt_enabled = 0;
 	touch_is_pressed = 0;
+#if TOUCH_BOOSTER
+	tsp_press_status = 0;
+#endif
 	return mxt_internal_suspend(data);
 }
 
@@ -1590,12 +2249,21 @@ void read_dbg_data(uint8_t dbg_mode , uint16_t node, uint16_t *dbg_data)
 }
 
 #define MIN_VALUE 19744
-#define MAX_VALUE 28864
+#define MAX_VALUE 28884
+#define MIN_VALUE_TA_ERROR_MODE	19125
+
+#define T48_CALCFG_CHRGON		0x20
+
+/* caution : should check the sensor level
+this value is depend on tsp tunning state */
+#define SENSOR_GAIN_TAERROR	5
 
 int read_all_data(uint16_t dbg_mode)
 {
 	u8 read_page, read_point;
 	u16 max_value = MIN_VALUE, min_value = MAX_VALUE;
+	u16 ref_max_value = MAX_VALUE;
+	u16 ref_min_value = MIN_VALUE;
 	u16 object_address = 0;
 	u8 data_buffer[2] = { 0 };
 	u8 node = 0;
@@ -1603,11 +2271,37 @@ int read_all_data(uint16_t dbg_mode)
 	int num = 0;
 	int ret;
 	u16 size;
+	u8 val = 0;
+	u8 sensor_gain = 0;
 	bool ta_status = 0;
 
 	if (copy_data->read_ta_status) {
 		copy_data->read_ta_status(&ta_status);
 		printk(KERN_INFO "[TSP] ta_status is %d\n", ta_status);
+	}
+
+	/* check the CHRG_ON bit is set or not */
+	/* when CHRG_ON is setted dual x is on so skip read last line*/
+	get_object_info(copy_data,
+		PROCG_NOISESUPPRESSION_T48, &size, &object_address);
+	ret = read_mem(copy_data, object_address+2 , 1, &val);
+	if (ret < 0)
+		printk(KERN_ERR " TSP read fail : %s", __func__);
+
+	printk(KERN_INFO "[TSP] %s CALCFG[%#02x]\n", __func__, val);
+	val = val & T48_CALCFG_CHRGON;
+
+	/* read sensor gain to check reference value */
+	if (val == T48_CALCFG_CHRGON) {
+
+		ret = read_mem(copy_data, object_address+34 , 1, &sensor_gain);
+		if (ret < 0)
+			printk(KERN_ERR " TSP read fail : %s", __func__);
+		sensor_gain = (sensor_gain&0xF0)>>4;
+
+		printk(KERN_INFO "[TSP] %s BLEN[%d]\n", __func__, sensor_gain);
+		if (sensor_gain == SENSOR_GAIN_TAERROR)
+			ref_min_value = MIN_VALUE_TA_ERROR_MODE;
 	}
 
 	/* Page Num Clear */
@@ -1630,10 +2324,14 @@ int read_all_data(uint16_t dbg_mode)
 
 			/* last X line has 1/2 reference during
 				TA mode So do not check min/max value */
-			if ((ta_status == 0) || (ta_status && (num < 736))) {
-				if ((qt_refrence_node[num] < MIN_VALUE)
-				|| (qt_refrence_node[num] > MAX_VALUE)) {
-					state = 1;
+			if ((val != T48_CALCFG_CHRGON)
+				|| (val == T48_CALCFG_CHRGON && (num < 736))) {
+				if ((qt_refrence_node[num] < ref_min_value)
+				|| (qt_refrence_node[num] > ref_max_value)) {
+					if (sensor_gain == SENSOR_GAIN_TAERROR)
+						state = 2;
+					else
+						state = 1;
 					printk(KERN_ERR
 						"[TSP] Mxt768E qt_refrence_node[%3d] = %5d\n"
 						, num, qt_refrence_node[num]);
@@ -1648,6 +2346,7 @@ int read_all_data(uint16_t dbg_mode)
 							qt_refrence_node[num];
 				}
 			}
+
 			num++;
 			/* all node => 24 * 32 = 768 => (12page * 64) */
 			/* if ((read_page == 11) && (node == 64))
@@ -2142,7 +2841,6 @@ static ssize_t set_refer3_mode_show(struct device *dev, struct device_attribute 
 
 static ssize_t set_refer4_mode_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
-        struct mxt_data *data = copy_data;
 	uint16_t mxt_reference=0;
 	read_dbg_data(MXT_REFERENCE_MODE, test_node[4], &mxt_reference);
 	return sprintf(buf, "%u\n", mxt_reference);
@@ -2285,17 +2983,35 @@ ssize_t disp_all_deltadata_store(struct device *dev, struct device_attribute *at
 
 static ssize_t set_firm_version_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
+	struct mxt_data *data = copy_data;
+
 	u8 id[ID_BLOCK_SIZE];
 	u8 value;
 	int ret;
+	u8 i;
 
-	ret = read_mem(copy_data, 0, sizeof(id), id);
-	if (ret) {
+	if (mxt_enabled == 1) {
+		disable_irq(data->client->irq);
+		for (i = 0; i < 4; i++) {
+			ret = read_mem(copy_data, 0, sizeof(id), id);
+			if (!ret)
+				break;
+		}
+		enable_irq(data->client->irq);
+		if (ret < 0) {
+			printk(KERN_ERR " TSP read fail : %s", __func__);
+			value = 0;
+			return sprintf(buf, "%d\n", value);
+		} else {
+			printk(KERN_DEBUG "%s : %#02x\n",
+				__func__, id[2]);
+			return sprintf(buf, "%#02x\n", id[2]);
+		}
+	} else {
+		printk(KERN_ERR " TSP power off : %s", __func__);
 		value = 0;
 		return sprintf(buf, "%d\n", value);
 	}
-
-	return sprintf(buf, "%#02x\n", id[2]);
 }
 
 static ssize_t set_module_off_show(struct device *dev, struct device_attribute *attr, char *buf)
@@ -2306,7 +3022,9 @@ static ssize_t set_module_off_show(struct device *dev, struct device_attribute *
 	if (mxt_enabled == 1) {
 		mxt_enabled = 0;
 		touch_is_pressed = 0;
-
+#if TOUCH_BOOSTER
+		tsp_press_status = 0;
+#endif
 		disable_irq(data->client->irq);
 		mxt_internal_suspend(data);
 	}
@@ -3032,7 +3750,9 @@ static int __devinit mxt_probe(struct i2c_client *client, const struct i2c_devic
 	u8 **tsp_config;
 
 	touch_is_pressed = 0;
-
+#if TOUCH_BOOSTER
+	tsp_press_status = 0;
+#endif
 	if (!pdata) {
 		dev_err(&client->dev, "missing platform data\n");
 		return -ENODEV;
@@ -3125,11 +3845,11 @@ static int __devinit mxt_probe(struct i2c_client *client, const struct i2c_devic
 		tsp_config = (u8 **)pdata->config_e;
 		data->t48_config_batt_e = pdata->t48_config_batt_e;
 		data->t48_config_chrg_e = pdata->t48_config_chrg_e;
-		data->t56_config_e = pdata->t56_config_e;
 		data->tchthr_batt = pdata->tchthr_batt_e;
 		data->tchthr_charging = pdata->tchthr_charging_e;
 		data->calcfg_batt_e = pdata->calcfg_batt_e;
 		data->calcfg_charging_e = pdata->calcfg_charging_e;
+		data->atchcalsthr_e = pdata->atchcalsthr_e;
 		data->atchfrccalthr_e = pdata->atchfrccalthr_e;
 		data->atchfrccalratio_e = pdata->atchfrccalratio_e;
 		data->chrgtime_batt = pdata->chrgtime_batt;
@@ -3140,6 +3860,27 @@ static int __devinit mxt_probe(struct i2c_client *client, const struct i2c_devic
 		data->actvsyncsperx_charging = pdata->actvsyncsperx_charging;
 		data->idleacqint_batt = pdata->idleacqint_batt;
 		data->idleacqint_charging = pdata->idleacqint_charging;
+		data->actacqint_batt = pdata->actacqint_batt;
+		data->actacqint_charging = pdata->actacqint_charging;
+		data->xloclip_batt = pdata->xloclip_batt;
+		data->xloclip_charging = pdata->xloclip_charging;
+		data->xhiclip_batt = pdata->xhiclip_batt;
+		data->xhiclip_charging = pdata->xhiclip_charging;
+		data->yloclip_batt = pdata->yloclip_batt;
+		data->yloclip_charging = pdata->yloclip_charging;
+		data->yhiclip_batt = pdata->yhiclip_batt;
+		data->yhiclip_charging = pdata->yhiclip_charging;
+		data->xedgectrl_batt = pdata->xedgectrl_batt;
+		data->xedgectrl_charging = pdata->xedgectrl_charging;
+		data->xedgedist_batt = pdata->xedgedist_batt;
+		data->xedgedist_charging = pdata->xedgedist_charging;
+		data->yedgectrl_batt = pdata->yedgectrl_batt;
+		data->yedgectrl_charging = pdata->yedgectrl_charging;
+		data->yedgedist_batt = pdata->yedgedist_batt;
+		data->yedgedist_charging = pdata->yedgedist_charging;
+		data->tchhyst_batt = pdata->tchhyst_batt;
+		data->tchhyst_charging = pdata->tchhyst_charging;
+
 		printk("[TSP] TSP chip is MXT768-E\n");
 #if !defined(FOR_DEBUGGING_TEST_DOWNLOADFW_BIN)// add_for_bin_download
 		if ((data->tsp_version < firmware_latest[1]
@@ -3155,7 +3896,18 @@ static int __devinit mxt_probe(struct i2c_client *client, const struct i2c_devic
 			}
 		}
 #endif
-		INIT_DELAYED_WORK(&data->config_dwork, mxt_reconfigration_normal);
+		INIT_DELAYED_WORK(&data->config_dwork,
+			mxt_reconfigration_normal);
+		INIT_DELAYED_WORK(&data->overflow_dwork,
+			mxt_calbration_by_overflowed);
+		INIT_DELAYED_WORK(&data->check_median_error_dwork,
+			mxt_check_medianfilter_error);
+		INIT_DELAYED_WORK(&data->check_abnormal_palm_dwork,
+			mxt_check_abnormal_palm);
+#if TOUCH_BOOSTER
+		INIT_DELAYED_WORK(&data->dvfs_dwork,
+			mxt_set_dvfs_off);
+#endif
 	}
 	else if (data->family_id == 0x80) {	/*  : MXT-224 */
 		tsp_config = (u8 **)pdata->config;
@@ -3191,7 +3943,6 @@ static int __devinit mxt_probe(struct i2c_client *client, const struct i2c_devic
 		printk(KERN_ERR"ERROR : There is no valid TSP ID\n");
 		goto err_config;
 	}
-
 	for (i = 0; tsp_config[i][0] != RESERVED_T255; i++) {
 		ret = init_write_config(data, tsp_config[i][0],
 							tsp_config[i] + 1);
@@ -3212,9 +3963,6 @@ static int __devinit mxt_probe(struct i2c_client *client, const struct i2c_devic
 			}
 		}
 	}
-
-	if ((data->family_id == 0xA1) && (data->tsp_version == 0x20))
-		shieldless_init(data);
 
 	ret = mxt_backup(data);
 	if (ret)
@@ -3361,13 +4109,14 @@ static int __devinit mxt_probe(struct i2c_client *client, const struct i2c_devic
 		printk(KERN_ERR "Failed to create device file(%s)!\n", dev_attr_find_delta_channel.attr.name);
 
 #ifdef CONFIG_HAS_EARLYSUSPEND
-	data->early_suspend.level = EARLY_SUSPEND_LEVEL_DISABLE_FB;/*EARLY_SUSPEND_LEVEL_BLANK_SCREEN + 1;*/
+	data->early_suspend.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN + 1;
 	data->early_suspend.suspend = mxt_early_suspend;
 	data->early_suspend.resume = mxt_late_resume;
 	register_early_suspend(&data->early_suspend);
 #endif
 	if (data->family_id == 0xA1) {	/*  : MXT-768E */
-		schedule_delayed_work(&data->config_dwork, HZ*5);
+		schedule_delayed_work(&data->config_dwork
+			, HZ*TIME_FOR_RECONFIG_ON_BOOT);
 	}
 	else if (data->family_id == 0x81) {	/*  : MXT-224E */
 		schedule_delayed_work(&data->config_dwork, HZ*5);

@@ -27,6 +27,15 @@ config SENSORS_BH1721FVC
 	  This option eanbles the light sensor device driver for
 	  the ROHM BH1721FVC chip.
 
+config SENSORS_AL3201
+	tristate "LITEON AL3201 ambient light sensor"
+	depends on I2C
+	help
+	  Say Y here if you have LITEON AL3201 hooked to an I2C bus.
+
+	  This option eanbles the light sensor device driver for
+	  the LITEON AL3201 chip.
+
 config INPUT_88PM860X_ONKEY
 	tristate "88PM860x ONKEY support"
 	depends on MFD_88PM860X
@@ -476,7 +485,7 @@ config MPU_SENSORS_AK8975C
 	help
 	  If you say yes here you get support for Asahi Kasei's
 	  magnetometer sensor AK8975C.
-	  
+
 config OPTICAL_GP2A
 	depends on I2C && GENERIC_GPIO
 	tristate "GP2A ambient light and proximity input device"
@@ -490,5 +499,5 @@ config OPTICAL_WAKE_ENABLE
 	default n
 	help
 	  This option enables proximity & light sensors using wake up gpio.
-	  
+
 endif

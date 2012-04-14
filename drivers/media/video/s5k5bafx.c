@@ -71,7 +71,9 @@ static const struct s5k5bafx_regs reg_datas = {
 	.init = S5K5BAFX_REGSET_TABLE(s5k5bafx_common),
 	.init_vt = S5K5BAFX_REGSET_TABLE(s5k5bafx_vt_common),
 	.init_vt_wifi = S5K5BAFX_REGSET_TABLE(s5k5bafx_vt_wifi_common),
-#if defined(CONFIG_TARGET_LOCALE_KOR) || defined(CONFIG_TARGET_LOCALE_NAATT)
+#if defined(CONFIG_TARGET_LOCALE_KOR) || \
+	defined(CONFIG_TARGET_LOCALE_NAATT) || \
+	defined(CONFIG_MACH_P8LTE_REV00)
 	.init_recording = S5K5BAFX_REGSET_TABLE(s5k5bafx_recording_60Hz_common),
 #else
 	.init_recording = S5K5BAFX_REGSET_TABLE(s5k5bafx_recording_50Hz_common),
@@ -108,6 +110,12 @@ static inline int s5k5bafx_read(struct i2c_client *client,
 		.len = 2,
 		.buf = buf,
 	};
+
+	if (unlikely(!client->adapter)) {
+		cam_err("%s: ERROR, can't search i2c client adapter\n",
+			__func__);
+		return -ENODEV;
+	}
 
 	*(u16 *)buf = cpu_to_be16(subaddr);
 
@@ -319,7 +327,6 @@ static inline int s5k5bafx_write(struct i2c_client *client,
 {
 	u8 buf[4];
 	int err = 0, retry_count = 5;
-
 	struct i2c_msg msg = {
 		.addr	= client->addr,
 		.flags	= 0,
@@ -327,10 +334,10 @@ static inline int s5k5bafx_write(struct i2c_client *client,
 		.len	= 4,
 	};
 
-	if (!client->adapter) {
+	if (unlikely(!client->adapter)) {
 		cam_err("%s: ERROR, can't search i2c client adapter\n",
-							__func__);
-		return -EIO;
+			__func__);
+		return -ENODEV;
 	}
 
 	while (retry_count--) {
@@ -473,9 +480,7 @@ static int s5k5bafx_read_reg(struct v4l2_subdev *sd,
 	err = s5k5bafx_write(client, page_cmd);
 	CHECK_ERR(err);
 	err = s5k5bafx_write(client, addr_cmd);
-	CHECK_ERR(err);
 	err = s5k5bafx_read(client, 0x0F12, val);
-	CHECK_ERR(err);
 
 	return 0;
 }
@@ -508,6 +513,12 @@ static int s5k5bafx_write_regs(struct v4l2_subdev *sd,
 		msg.buf = buf,
 	};
 
+	if (unlikely(!client->adapter)) {
+		cam_err("%s: ERROR, can't search i2c client adapter\n",
+			__func__);
+		return -ENODEV;
+	}
+
 	while (num--) {
 		temp = *packet++;
 
@@ -520,6 +531,8 @@ static int s5k5bafx_write_regs(struct v4l2_subdev *sd,
 #ifdef S5K5BAFX_BURST_MODE
 		addr = temp >> 16;
 		value = temp & 0xFFFF;
+
+		/* cam_dbg("I2C writes: 0x%04X, 0x%04X\n", addr, value); */
 
 		switch (addr) {
 		case 0x0F12:
@@ -743,11 +756,11 @@ static int s5k5bafx_check_sensor_status(struct v4l2_subdev *sd)
 	if ((val_1 != 0xAAAA) || (val_2 != 0))
 		goto error_occur;
 
-	cam_info("Sensor ESD Check: not detected\n");
+	cam_info("Check ESD: not detected\n\n");
 	return 0;
 
 error_occur:
-	cam_err("%s: ERROR, ESD Shock detected!\n\n", __func__);
+	cam_err("Check ESD: ERROR, ESD Shock detected!\n\n");
 	return -ERESTART;
 }
 
@@ -817,6 +830,40 @@ static int s5k5bafx_set_sensor_mode(struct v4l2_subdev *sd,
 						__func__, val);
 		return -EINVAL;
 	}
+
+	return 0;
+}
+
+static int s5k5bafx_init_regs(struct v4l2_subdev *sd)
+{
+	struct s5k5bafx_state *state = to_state(sd);
+	const u32 write_reg = 0x00287000;
+	u16 read_value = 0;
+	int err = -ENODEV;
+
+	/* enter read mode */
+	err = s5k5bafx_read_reg(sd, 0xD000, 0x1006, &read_value);
+	if (unlikely(err < 0))
+		return -ENODEV;
+
+	if (likely(read_value == S5K5BAFX_CHIP_ID))
+		cam_info("Sensor ChipID: 0x%04X\n", S5K5BAFX_CHIP_ID);
+	else
+		cam_info("Sensor ChipID: 0x%04X, unknown ChipID\n", read_value);
+
+	err = s5k5bafx_read_reg(sd, 0xD000, 0x1008, &read_value);
+	if (likely((u8)read_value == S5K5BAFX_CHIP_REV))
+		cam_info("Sensor revision: 0x%02X\n", S5K5BAFX_CHIP_REV);
+	else
+		cam_info("Sensor revision: 0x%02X, unknown revision\n",
+				(u8)read_value);
+
+	/* restore write mode */
+	err = s5k5bafx_write_regs(sd, &write_reg, 1);
+	if (unlikely(err < 0))
+		return -ENODEV;
+
+	state->regs = &reg_datas;
 
 	return 0;
 }
@@ -924,17 +971,13 @@ static int s5k5bafx_set_frame_rate(struct v4l2_subdev *sd, u32 fps)
 	int err = -EIO;
 	int i = 0, fps_index = -1;
 
-	cam_info("set frame rate %d\n\n", fps);
-
-	if (state->sensor_mode == SENSOR_MOVIE) {
-		cam_warn("%s: WARNING, recording mode supports fixed 25 fps.\n",
-						__func__);
-		return 0;
-	}
+	cam_info("set frame rate %d\n", fps);
 
 	for (i = 0; i < ARRAY_SIZE(s5k5bafx_framerates); i++) {
 		if (fps == s5k5bafx_framerates[i].fps) {
-			fps_index = s5k5bafx_framerates[i].index;;
+			fps_index = s5k5bafx_framerates[i].index;
+			state->fps = fps;
+			state->req_fps = -1;
 			break;
 		}
 	}
@@ -944,11 +987,12 @@ static int s5k5bafx_set_frame_rate(struct v4l2_subdev *sd, u32 fps)
 		return 0;
 	}
 
-	err = s5k5bafx_set_from_table(sd, "fps",
-				state->regs->fps,
-				ARRAY_SIZE(state->regs->fps), fps_index);
+	if (state->sensor_mode != SENSOR_MOVIE) {
+		err = s5k5bafx_set_from_table(sd, "fps", state->regs->fps,
+			ARRAY_SIZE(state->regs->fps), fps_index);
+		CHECK_ERR_N_MSG(err, "fail to set framerate\n")
+	}
 
-	CHECK_ERR_N_MSG(err, "fail to set framerate\n")
 	return 0;
 }
 
@@ -964,34 +1008,25 @@ static int s5k5bafx_g_parm(struct v4l2_subdev *sd, struct v4l2_streamparm *parms
 static int s5k5bafx_s_parm(struct v4l2_subdev *sd, struct v4l2_streamparm *parms)
 {
 	int err = 0;
-	u32 fps = 0;
 	struct s5k5bafx_state *state = to_state(sd);
 
-	if (!state->vt_mode)
-		return 0;
-
-	cam_trace("E\n");
-
-	fps = parms->parm.capture.timeperframe.denominator /
+	state->req_fps = parms->parm.capture.timeperframe.denominator /
 			parms->parm.capture.timeperframe.numerator;
 
-	if (fps != state->set_fps) {
-		if (fps < 0 && fps > 15) {
-			cam_err("%s: ERROR, invalid frame rate %d\n",
-						__func__, fps);
-			fps = 15;
-		}
-		state->req_fps = fps;
+	cam_dbg("s_parm fps=%d, req_fps=%d\n", state->fps, state->req_fps);
 
-		if (state->initialized) {
-			err = s5k5bafx_set_frame_rate(sd, state->req_fps);
-			if (err >= 0)
-				state->set_fps = state->req_fps;
-		}
-
+	if ((state->req_fps < 0) && (state->req_fps > 15)) {
+		cam_err("%s: ERROR, invalid frame rate %d. we'll set to %d\n",
+			__func__, state->req_fps, DEFAULT_FPS);
+		state->req_fps = DEFAULT_FPS;
 	}
 
-	return err;
+	if (state->initialized) {
+		err = s5k5bafx_set_frame_rate(sd, state->req_fps);
+		CHECK_ERR(err);
+	}
+
+	return 0;
 }
 
 #if (0) /* not used */
@@ -1028,6 +1063,34 @@ static int s5k5bafx_set_60hz_antibanding(struct v4l2_subdev *sd)
 }
 #endif
 
+static int s5k5bafx_wait_steamoff(struct v4l2_subdev *sd)
+{
+	struct s5k5bafx_state *state = to_state(sd);
+	struct s5k5bafx_stream_time *stream_time = &state->stream_time;
+	s32 elapsed_msec = 0;
+
+	cam_trace("E\n");
+
+	if (unlikely(!(state->pdata->is_mipi & state->need_wait_streamoff)))
+		return 0;
+
+	do_gettimeofday(&stream_time->curr_time);
+
+	elapsed_msec = GET_ELAPSED_TIME(stream_time->curr_time, \
+				stream_time->before_time) / 1000;
+
+	if (state->pdata->streamoff_delay > elapsed_msec) {
+		cam_info("stream-off: %dms + %dms\n", elapsed_msec,
+			state->pdata->streamoff_delay - elapsed_msec);
+		debug_msleep(state->pdata->streamoff_delay - elapsed_msec);
+	} else
+		cam_info("stream-off: %dms\n", elapsed_msec);
+
+	state->need_wait_streamoff = 0;
+
+	return 0;
+}
+
 static int s5k5bafx_control_stream(struct v4l2_subdev *sd, u32 cmd)
 {
 	struct s5k5bafx_state *state = to_state(sd);
@@ -1039,9 +1102,12 @@ static int s5k5bafx_control_stream(struct v4l2_subdev *sd, u32 cmd)
 	cam_info("STREAM STOP!!\n");
 	err = s5k5bafx_set_from_table(sd, "stream_stop",
 				&state->regs->stream_stop, 1, 0);
-
 	CHECK_ERR_N_MSG(err, "failed to stop stream\n");
-#ifndef CONFIG_VIDEO_IMPROVE_STREAMOFF
+
+#ifdef CONFIG_VIDEO_IMPROVE_STREAMOFF
+	do_gettimeofday(&state->stream_time.before_time);
+	state->need_wait_streamoff = 1;
+#else
 	debug_msleep(state->pdata->streamoff_delay);
 #endif
 	return 0;
@@ -1054,6 +1120,9 @@ static int s5k5bafx_init(struct v4l2_subdev *sd, u32 val)
 	static int lock_level = -1;
 
 	cam_trace("E\n");
+
+	err = s5k5bafx_init_regs(sd);
+	CHECK_ERR_N_MSG(err, "failed to indentify sensor chip\n");
 
 #ifdef CONFIG_CPU_FREQ
 	if (lock_level < 0)
@@ -1087,21 +1156,14 @@ static int s5k5bafx_init(struct v4l2_subdev *sd, u32 val)
 #ifdef CONFIG_CPU_FREQ
 	s5pv310_cpufreq_lock_free(DVFS_LOCK_ID_CAM);
 #endif
-	CHECK_ERR_N_MSG(err, "failed to init. err=%d\n", err);
-
-	/* We stop stream-output from sensor when starting camera. */
-	if (likely(state->pdata->is_mipi)) {
-		err = s5k5bafx_control_stream(sd, STREAM_STOP);
-		CHECK_ERR(err);
-	}
-
-	if (state->vt_mode && (state->req_fps != state->set_fps)) {
-		err = s5k5bafx_set_frame_rate(sd, state->req_fps);
-		CHECK_ERR(err);
-		state->set_fps = state->req_fps;
-	}
+	CHECK_ERR_N_MSG(err, "failed to initialize camera device\n");
 
 	state->initialized = 1;
+
+	if (state->req_fps >= 0) {
+		err = s5k5bafx_set_frame_rate(sd, state->req_fps);
+		CHECK_ERR(err);
+	}
 
 	return 0;
 }
@@ -1125,9 +1187,9 @@ static int s5k5bafx_s_config(struct v4l2_subdev *sd,
 	cam_trace("E\n");
 
 	state->initialized = 0;
-	state->req_fps = state->set_fps = 8;
+	state->fps = 0;
+	state->req_fps = -1;
 	state->sensor_mode = SENSOR_CAMERA;
-	state->regs = &reg_datas;
 
 	if (!platform_data) {
 		cam_err("%s: ERROR, no platform data\n", __func__);
@@ -1225,6 +1287,11 @@ static int s5k5bafx_s_stream(struct v4l2_subdev *sd, int enable)
 		cam_dbg("%s: do nothing(movie off)!!\n", __func__);
 		break;
 
+#ifdef CONFIG_VIDEO_IMPROVE_STREAMOFF
+	case STREAM_MODE_WAIT_OFF:
+		err = s5k5bafx_wait_steamoff(sd);
+		break;
+#endif
 	default:
 		cam_err("%s: ERROR, Invalid stream mode %d\n",
 						__func__, enable);
@@ -1297,6 +1364,8 @@ static int s5k5bafx_g_ctrl(struct v4l2_subdev *sd, struct v4l2_control *ctrl)
 
 	cam_dbg("g_ctrl: id = %d\n", ctrl->id - V4L2_CID_PRIVATE_BASE);
 
+	mutex_lock(&state->ctrl_lock);
+
 	switch (ctrl->id) {
 	case V4L2_CID_CAMERA_EXIF_EXPTIME:
 		ctrl->value = state->exif.exp_time_den;
@@ -1310,6 +1379,8 @@ static int s5k5bafx_g_ctrl(struct v4l2_subdev *sd, struct v4l2_control *ctrl)
 		break;
 	}
 
+	mutex_unlock(&state->ctrl_lock);
+
 	return err;
 }
 
@@ -1319,7 +1390,7 @@ static int s5k5bafx_s_ctrl(struct v4l2_subdev *sd, struct v4l2_control *ctrl)
 	struct s5k5bafx_state *state = to_state(sd);
 	int err = 0;
 
-	cam_info("s_ctrl: id = %d, value=%d\n",
+	cam_dbg("s_ctrl: id = %d, value=%d\n",
 		ctrl->id - V4L2_CID_PRIVATE_BASE, ctrl->value);
 
 	if ((ctrl->id != V4L2_CID_CAMERA_CHECK_DATALINE)
@@ -1329,6 +1400,8 @@ static int s5k5bafx_s_ctrl(struct v4l2_subdev *sd, struct v4l2_control *ctrl)
 		cam_warn("%s: WARNING, camera not initialized\n", __func__);
 		return 0;
 	}
+
+	mutex_lock(&state->ctrl_lock);
 
 	switch (ctrl->id) {
 	case V4L2_CID_CAMERA_BRIGHTNESS:
@@ -1373,6 +1446,8 @@ static int s5k5bafx_s_ctrl(struct v4l2_subdev *sd, struct v4l2_control *ctrl)
 		/* no errors return.*/
 		break;
 	}
+
+	mutex_unlock(&state->ctrl_lock);
 
 	cam_trace("X\n");
 	return 0;
@@ -1432,8 +1507,10 @@ static int s5k5bafx_probe(struct i2c_client *client,
 	cam_trace("E\n");
 
 	state = kzalloc(sizeof(struct s5k5bafx_state), GFP_KERNEL);
-	if (state == NULL)
+	if (unlikely(state == NULL))
 		return -ENOMEM;
+
+	mutex_init(&state->ctrl_lock);
 
 	sd = &state->sd;
 	strcpy(sd->name, S5K5BAFX_DRIVER_NAME);

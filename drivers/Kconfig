@@ -120,6 +120,10 @@ source "drivers/samsung/Kconfig"
 
 source "drivers/svnet/Kconfig"
 
+source "drivers/internal_dpram/Kconfig"
+
 source "drivers/accessory/Kconfig"
+
+source "drivers/irda/Kconfig"
 
 endmenu

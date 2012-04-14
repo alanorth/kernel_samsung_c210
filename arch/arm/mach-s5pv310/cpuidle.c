@@ -570,9 +570,6 @@ static int s5pv310_enter_core0_lpa(struct cpuidle_device *dev,
 	unsigned long tmp;
 
 	pr_info("++%s\n", __func__);
-#ifdef CONFIG_SAMSUNG_LTE
-	gpio_set_value(GPIO_PDA_ACTIVE, 0);
-#endif
 
 	s3c_pm_do_save(s5pv310_lpa_save, ARRAY_SIZE(s5pv310_lpa_save));
 
@@ -590,6 +587,9 @@ static int s5pv310_enter_core0_lpa(struct cpuidle_device *dev,
 #endif
 
 	local_irq_disable();
+#ifdef CONFIG_SAMSUNG_LTE
+	gpio_set_value(GPIO_PDA_ACTIVE, 0);
+#endif
 	do_gettimeofday(&before);
 
 	/*
@@ -874,6 +874,17 @@ static int loop_sdmmc_check(void)
 	return NO_OP;
 }
 
+#ifdef CONFIG_SAMSUNG_LTE
+static int check_usbotg_op(void)
+{
+	extern bool is_usb_lpm_enter;
+
+	if (is_usb_lpm_enter)
+		return NO_OP;
+
+	return IS_OP;
+}
+#else
 /*
  * Check USBOTG is working or not
  * GOTGCTL(0xEC000000)
@@ -892,6 +903,7 @@ static int check_usbotg_op(void)
 
 	return NO_OP;
 }
+#endif /* CONFIG_SAMSUNG_LTE */
 
 #ifdef CONFIG_USB_EHCI_HCD
 static int check_usb_host_op(void)

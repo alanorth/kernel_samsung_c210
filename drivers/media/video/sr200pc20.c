@@ -264,24 +264,25 @@ error_out:
 }
 #endif
 
-static int sr200pc20_i2c_read_byte(struct i2c_client *client,
-                                     unsigned short subaddr,
-                                     unsigned short *data)
+static int __used sr200pc20_i2c_read_byte(struct i2c_client *client,
+					u16 subaddr, u16 *data)
 {
-	unsigned char buf[2] = {0,};
+	u8 buf[2] = {0,};
 	struct i2c_msg msg = {client->addr, 0, 1, buf};
 	int err = 0;
 
-	if(!client->adapter) {
-		cam_err("ERROR! can't search i2c client adapter\n");
-		return -EIO;
+	if (unlikely(!client->adapter)) {
+		cam_err("%s: ERROR, can't search i2c client adapter\n",
+			__func__);
+		return -ENODEV;
 	}
 
-	buf[0] = (unsigned char)subaddr;
+	buf[0] = (u8)subaddr;
 
 	err = i2c_transfer(client->adapter, &msg, 1);
-	if(err < 0) {
-		cam_err(" ERROR! %d register read failed\n",subaddr);
+	if (unlikely(err < 0)) {
+		cam_err("%s: ERROR, failed to write %d register\n",
+			__func__, subaddr);
 		return -EIO;
 	}
 
@@ -289,27 +290,28 @@ static int sr200pc20_i2c_read_byte(struct i2c_client *client,
 	msg.len = 1;
 
 	err = i2c_transfer(client->adapter, &msg, 1);
-	if(err < 0) {
-		cam_err(" ERROR! %d register read failed\n",subaddr);
+	if (unlikely(err < 0)) {
+		cam_err("%s: ERROR, failed to read %d register\n",
+			__func__, subaddr);
 		return -EIO;
 	}
 
-	*data = (unsigned short)buf[0];
+	*(u8 *)data = buf[0];
 
 	return 0;
 }
 
-static int sr200pc20_i2c_write_byte(struct i2c_client *client,
-                                     unsigned short subaddr,
-                                     unsigned short data)
+static int __used sr200pc20_i2c_write_byte(struct i2c_client *client,
+					u16 subaddr, u16 data)
 {
-	unsigned char buf[2] = {0,};
+	u8 buf[2] = {0,};
 	struct i2c_msg msg = {client->addr, 0, 2, buf};
 	int err = 0;
 
-	if(!client->adapter) {
-		cam_err(" ERROR! can't search i2c client adapter\n");
-		return -EIO;
+	if (unlikely(!client->adapter)) {
+		cam_err("%s: ERROR, can't search i2c client adapter\n",
+			__func__);
+		return -ENODEV;
 	}
 
 	buf[0] = subaddr & 0xFF;
@@ -320,25 +322,26 @@ static int sr200pc20_i2c_write_byte(struct i2c_client *client,
 	return (err == 1)? 0 : -EIO;
 }
 
-static int sr200pc20_i2c_read_word(struct i2c_client *client,
-                                     unsigned short subaddr,
-                                     unsigned short *data)
+static int __used sr200pc20_i2c_read_word(struct i2c_client *client,
+					u16 subaddr, u16 *data)
 {
-	unsigned char buf[4];
+	u8 buf[4];
 	struct i2c_msg msg = {client->addr, 0, 2, buf};
 	int err = 0;
 
-	if(!client->adapter) {
-		cam_err(" ERROR! can't search i2c client adapter\n");
-		return -EIO;
+	if (unlikely(!client->adapter)) {
+		cam_err("%s: ERROR, can't search i2c client adapter\n",
+			__func__);
+		return -ENODEV;
 	}
 
 	buf[0] = subaddr>> 8;
 	buf[1] = subaddr & 0xff;
 
 	err = i2c_transfer(client->adapter, &msg, 1);
-	if(err < 0) {
-		cam_err(" ERROR! %d register read failed\n", subaddr);
+	if (unlikely(err < 0)) {
+		cam_err("%s: ERROR, failed to write %d register\n",
+			__func__, subaddr);
 		return -EIO;
 	}
 
@@ -346,8 +349,9 @@ static int sr200pc20_i2c_read_word(struct i2c_client *client,
 	msg.len = 2;
 
 	err = i2c_transfer(client->adapter, &msg, 1);
-	if(err < 0) {
-		cam_err(" ERROR! %d register read failed\n", subaddr);
+	if (unlikely(err < 0)) {
+		cam_err("%s: ERROR, failed to read %d register\n",
+			__func__, subaddr);
 		return -EIO;
 	}
 
@@ -356,17 +360,17 @@ static int sr200pc20_i2c_read_word(struct i2c_client *client,
 	return 0;
 }
 
-static int sr200pc20_i2c_write_word(struct i2c_client *client,
-                                     unsigned short subaddr,
-                                     unsigned short data)
+static int __used sr200pc20_i2c_write_word(struct i2c_client *client,
+					u16 subaddr, u16 data)
 {
-	unsigned char buf[4];
+	u8 buf[4];
 	struct i2c_msg msg = {client->addr, 0, 4, buf};
 	int err = 0;
 
-	if(!client->adapter) {
-		cam_err(" ERROR! can't search i2c client adapter\n");
-		return -EIO;
+	if (unlikely(!client->adapter)) {
+		cam_err("%s: ERROR, can't search i2c client adapter\n",
+			__func__);
+		return -ENODEV;
 	}
 
 	buf[0] = subaddr >> 8;
@@ -380,14 +384,14 @@ static int sr200pc20_i2c_write_word(struct i2c_client *client,
 }
 
 static int sr200pc20_i2c_set_data_burst(struct v4l2_subdev *sd,
-					regs_short_t reg_buffer[],
+					const regs_short_t reg_buffer[],
 					u32 num_of_regs)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	u16 subaddr, data_value;
 	int i, err = 0;
 
-	for(i = 0; i < num_of_regs; i++) {
+	for (i = 0; i < num_of_regs; i++) {
 		subaddr = reg_buffer[i].subaddr;
 		data_value = reg_buffer[i].value;
 
@@ -397,8 +401,10 @@ static int sr200pc20_i2c_set_data_burst(struct v4l2_subdev *sd,
 			break;
 		default:
 			err = sr200pc20_i2c_write_byte(client, subaddr, data_value);
-			if(err < 0) {
-				cam_err("i2c write fail\n");
+			if (unlikely(err < 0)) {
+				cam_err("%s: ERROR, failed to"
+					"write reg(0x%02X, 0x%02X).err=%d\n",
+					__func__, subaddr, data_value, err);
 				return -EIO;
 			}
 			break;
@@ -531,8 +537,8 @@ static int sr200pc20_set_from_table(struct v4l2_subdev *sd,
 {
 	int err = 0;
 
-	cam_dbg("%s: set %s index %d\n",
-		__func__, setting_name, index);
+	/* cam_dbg("%s: set %s index %d\n",
+		__func__, setting_name, index);*/
 	if ((index < 0) || (index >= table_size)) {
 		cam_err("%s: ERROR, index(%d) out of range[0:%d]"
 			"for table for %s\n", __func__, index,
@@ -554,7 +560,7 @@ static int sr200pc20_set_from_table(struct v4l2_subdev *sd,
 	err = sr200pc20_i2c_set_data_burst(sd, table->reg, table->array_size);
 	if (unlikely(err < 0)) {
 		cam_err("%s: ERROR, fail to write regs(%s), err=%d\n",
-				__func__, setting_name, err);
+			__func__, setting_name, err);
 		return -EIO;
 	}
 
@@ -562,46 +568,73 @@ static int sr200pc20_set_from_table(struct v4l2_subdev *sd,
 #endif
 }
 
-static int sr200pc20_get_exif(struct v4l2_subdev *sd)
+static inline int sr200pc20_get_iso(struct v4l2_subdev *sd, u16 *iso)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
-	struct sr200pc20_state *state = to_state(sd);
-	u16 iso_gain_table[] = {10, 18, 23, 28};
-	u16 iso_table[] = {0, 50, 100, 200, 400};
-	u16 gain = 0, val = 0;
-	s32 index = 0;
-	u16 read_value1 = 0, read_value2 = 0, read_value3 = 0;
-	u32 exp_time;
+	/* u16 iso_gain_table[] = {10, 18, 23, 28};
+	u16 iso_table[] = {0, 50, 100, 200, 400}; */
+	u16 read_value = 0, gain = 0;
 
-	state->exif.exp_time_den = 0;
-	state->exif.iso = 0;
+
+	sr200pc20_i2c_write_byte(client, 0x03, 0x20);
+	sr200pc20_i2c_read_byte(client, 0xb0, &read_value);
+	gain = (read_value * 100  / 32) + 50;
+
+	if (read_value < 125)
+		*iso = 50;
+	else if (read_value < 175)
+		*iso = 100;
+	else if (read_value < 250)
+		*iso = 200;
+	else if (read_value < 375)
+		*iso = 400;
+	else if (read_value < 550)
+		*iso = 800;
+	else
+		*iso = 1600;
+
+	cam_dbg("gain=%d, ISO=%d\n", gain, *iso);
+
+	return 0;
+}
+
+static int sr200pc20_get_expousretime(struct v4l2_subdev *sd,
+					u32 *exp_time)
+{
+	struct i2c_client *client = v4l2_get_subdevdata(sd);
+	u16 read_value = 0;
+	u32 cintr = 0;
+
+	sr200pc20_i2c_write_byte(client, 0x03, 0x20);
+	sr200pc20_i2c_read_byte(client, 0x80, &read_value);
+	cintr = read_value << 19;
+	sr200pc20_i2c_read_byte(client, 0x81, &read_value);
+	cintr |= read_value << 11;
+	sr200pc20_i2c_read_byte(client, 0x82, &read_value);
+	cintr |= read_value << 3;
+
+	*exp_time =  cintr / 24; /* us */
+
+	return 0;
+}
+
+static int sr200pc20_get_exif(struct v4l2_subdev *sd)
+{
+	struct sr200pc20_state *state = to_state(sd);
+	u32 exposure_time = 0;
 
 	/* Get exposure-time */
-	sr200pc20_i2c_write_byte(client, 0x03, 0x20);
-	sr200pc20_i2c_read_byte(client, 0x80, &read_value1);
-	sr200pc20_i2c_read_byte(client, 0x81, &read_value2);
-	sr200pc20_i2c_read_byte(client, 0x82, &read_value3);
-
-	exp_time = ((read_value1 << 19) + (read_value2 << 11) + \
-					(read_value3 << 3)) / 24;
-	state->exif.exp_time_den = 1000 / exp_time;
-	cam_dbg("exposure time=%dms\n", exp_time);
+	state->exif.exp_time_den = 0;
+	sr200pc20_get_expousretime(sd, &exposure_time);
+	state->exif.exp_time_den = 1000000 / exposure_time;
+	cam_dbg("exposure time=%dus\n", exposure_time);
 
 	/* Get ISO */
-	/*
-	val = 0;
-	sr200pc20_read_reg(sd, REG_PAGE_ISO, REG_ADDR_ISO, &val);
-	cam_dbg("val = %d\n", val);
-	gain = val * 10 / 256;
-	for (index = 0; index < ARRAY_SIZE(iso_gain_table); index++) {
-		if (gain < iso_gain_table[index])
-			break;
-	}
-	state->exif.iso = iso_table[index];*/
-	state->exif.iso = 100;
+	state->exif.iso = 0;
+	sr200pc20_get_iso(sd, &state->exif.iso);
 
-	cam_dbg("%s: gain=%d, exp_time_den=%d, ISO=%d\n",
-		__func__, gain, state->exif.exp_time_den, state->exif.iso);
+	cam_dbg("get_exif: exp_time_den=%d, ISO=%d\n",
+		state->exif.exp_time_den, state->exif.iso);
 	return 0;
 }
 
@@ -670,25 +703,18 @@ static int sr200pc20_set_preview_start(struct v4l2_subdev *sd)
 	struct sr200pc20_state *state = to_state(sd);
 	int err = -EINVAL;
 
+	if (state->first_preview) {
+		state->first_preview = 0;
+		return 0;
+	}
+
 	cam_info("set_preview_start\n");
 
 	err = sr200pc20_set_from_table(sd, "preview_start",
-			&state->regs->preview_start, 1, 0);
-#ifdef SUPPORT_FACTORY_TEST
-	if (state->check_dataline)
-		err = sr200pc20_check_dataline(sd, 1);
-#endif
+		&state->regs->preview_start, 1, 0);
 	CHECK_ERR_N_MSG(err, "fail to make preview\n")
 
 	return 0;
-}
-
-static int sr200pc20_set_preview_stop(struct v4l2_subdev *sd)
-{
-	int err = 0;
-	cam_info("do nothing.\n");
-
-	return err;
 }
 
 static int sr200pc20_set_capture_start(struct v4l2_subdev *sd)
@@ -699,13 +725,12 @@ static int sr200pc20_set_capture_start(struct v4l2_subdev *sd)
 	cam_info("set_capture_start\n");
 
 	err = sr200pc20_set_from_table(sd, "capture_start",
-				&state->regs->capture_start, 1, 0);
+			&state->regs->capture_start, 1, 0);
 	CHECK_ERR_N_MSG(err, "failed to make capture\n");
 
 	sr200pc20_get_exif(sd);
 
 	return err;
-
 }
 
 static int sr200pc20_set_sensor_mode(struct v4l2_subdev *sd, s32 val)
@@ -717,7 +742,7 @@ static int sr200pc20_set_sensor_mode(struct v4l2_subdev *sd, s32 val)
 		if (state->vt_mode) {
 			state->sensor_mode = SENSOR_CAMERA;
 			cam_warn("%s: WARNING, Not support movie in vt mode\n",
-							__func__);
+				__func__);
 			break;
 		}
 		/* We do not break. */
@@ -726,12 +751,35 @@ static int sr200pc20_set_sensor_mode(struct v4l2_subdev *sd, s32 val)
 		break;
 	default:
 		cam_err("%s: ERROR: Not support mode.(%d)\n",
-						__func__, val);
+			__func__, val);
 		return -EINVAL;
 	}
 
 	return 0;
 }
+
+static int sr200pc20_init_regs(struct v4l2_subdev *sd)
+{
+	struct sr200pc20_state *state = to_state(sd);
+	struct i2c_client *client = v4l2_get_subdevdata(sd);
+	u16 read_value = 0;
+	int err = -ENODEV;
+
+	err = sr200pc20_i2c_write_byte(client, 0x03, 0x00);
+	if (unlikely(err < 0))
+		return -ENODEV;
+
+	sr200pc20_i2c_read_byte(client, 0x04, &read_value);
+	if (likely(read_value == SR200PC20_CHIP_ID))
+		cam_info("Sensor ChipID: 0x%02X\n", SR200PC20_CHIP_ID);
+	else
+		cam_info("Sensor ChipID: 0x%02X, unknown chipID\n", read_value);
+
+	state->regs = &reg_datas;
+
+	return 0;
+}
+
 
 static int sr200pc20_g_fmt(struct v4l2_subdev *sd, struct v4l2_format *fmt)
 {
@@ -798,7 +846,7 @@ static int sr200pc20_s_fmt(struct v4l2_subdev *sd, struct v4l2_format *fmt)
 
 	default:
 		cam_err("%s: ERROR, inavlid FMT Mode(%d)\n",
-						__func__, state->req_fmt.priv);
+			__func__, state->req_fmt.priv);
 		return -EINVAL;
 	}
 
@@ -811,23 +859,19 @@ static int sr200pc20_s_fmt(struct v4l2_subdev *sd, struct v4l2_format *fmt)
 	return 0;
 }
 
-static int sr200pc20_set_frame_rate(struct v4l2_subdev *sd, u32 fps)
+static int sr200pc20_set_frame_rate(struct v4l2_subdev *sd, s32 fps)
 {
 	struct sr200pc20_state *state = to_state(sd);
 	int err = -EIO;
 	int i = 0, fps_index = -1;
 
-	cam_info("set frame rate %d\n\n", fps);
-
-	if (state->sensor_mode == SENSOR_MOVIE) {
-		cam_warn("%s: WARNING, recording mode supports fixed 25 fps.\n",
-						__func__);
-		return 0;
-	}
+	cam_info("set frame rate %d\n", fps);
 
 	for (i = 0; i < ARRAY_SIZE(sr200pc20_framerates); i++) {
 		if (fps == sr200pc20_framerates[i].fps) {
-			fps_index = sr200pc20_framerates[i].index;;
+			fps_index = sr200pc20_framerates[i].index;
+			state->fps = fps;
+			state->req_fps = -1;
 			break;
 		}
 	}
@@ -837,11 +881,12 @@ static int sr200pc20_set_frame_rate(struct v4l2_subdev *sd, u32 fps)
 		return 0;
 	}
 
-	err = sr200pc20_set_from_table(sd, "fps",
-				state->regs->fps,
-				ARRAY_SIZE(state->regs->fps), fps_index);
+	if (state->sensor_mode != SENSOR_MOVIE) {
+		err = sr200pc20_set_from_table(sd, "fps", state->regs->fps,
+			ARRAY_SIZE(state->regs->fps), fps_index);
+		CHECK_ERR_N_MSG(err, "fail to set framerate\n")
+	}
 
-	CHECK_ERR_N_MSG(err, "fail to set framerate\n")
 	return 0;
 }
 
@@ -857,34 +902,53 @@ static int sr200pc20_g_parm(struct v4l2_subdev *sd, struct v4l2_streamparm *parm
 static int sr200pc20_s_parm(struct v4l2_subdev *sd, struct v4l2_streamparm *parms)
 {
 	int err = 0;
-	u32 fps = 0;
 	struct sr200pc20_state *state = to_state(sd);
 
-	if (!state->vt_mode)
-		return 0;
+	state->req_fps = parms->parm.capture.timeperframe.denominator /
+			parms->parm.capture.timeperframe.numerator;
+
+	cam_dbg("s_parm fps=%d, req_fps=%d\n", state->fps, state->req_fps);
+
+	if ((state->req_fps < 0) || (state->req_fps > 30)) {
+		cam_err("%s: ERROR, invalid frame rate %d. we'll set to %d\n",
+				__func__, state->req_fps, DEFAULT_FPS);
+		state->req_fps = DEFAULT_FPS;
+	}
+
+	if (state->initialized) {
+		err = sr200pc20_set_frame_rate(sd, state->req_fps);
+		CHECK_ERR(err);
+	}
+
+	return 0;
+}
+
+static int sr200pc20_wait_steamoff(struct v4l2_subdev *sd)
+{
+	struct sr200pc20_state *state = to_state(sd);
+	struct sr200pc20_stream_time *stream_time = &state->stream_time;
+	s32 elapsed_msec = 0;
 
 	cam_trace("E\n");
 
-	fps = parms->parm.capture.timeperframe.denominator /
-			parms->parm.capture.timeperframe.numerator;
+	if (unlikely(!(state->pdata->is_mipi & state->need_wait_streamoff)))
+		return 0;
 
-	if (fps != state->set_fps) {
-		if (fps < 0 && fps > 15) {
-			cam_err("%s: ERROR, invalid frame rate %d\n",
-						__func__, fps);
-			fps = 15;
-		}
-		state->req_fps = fps;
+	do_gettimeofday(&stream_time->curr_time);
 
-		if (state->initialized) {
-			err = sr200pc20_set_frame_rate(sd, state->req_fps);
-			if (err >= 0)
-				state->set_fps = state->req_fps;
-		}
+	elapsed_msec = GET_ELAPSED_TIME(stream_time->curr_time, \
+				stream_time->before_time) / 1000;
 
-	}
+	if (state->pdata->streamoff_delay > elapsed_msec) {
+		cam_info("stream-off: %dms + %dms\n", elapsed_msec,
+			state->pdata->streamoff_delay - elapsed_msec);
+		debug_msleep(state->pdata->streamoff_delay - elapsed_msec);
+	} else
+		cam_info("stream-off: %dms\n", elapsed_msec);
 
-	return err;
+	state->need_wait_streamoff = 0;
+
+	return 0;
 }
 
 static int sr200pc20_control_stream(struct v4l2_subdev *sd, u32 cmd)
@@ -897,9 +961,12 @@ static int sr200pc20_control_stream(struct v4l2_subdev *sd, u32 cmd)
 
 	cam_info("STREAM STOP!!\n");
 	err = 0;
-
 	CHECK_ERR_N_MSG(err, "failed to stop stream\n");
-#ifndef CONFIG_VIDEO_IMPROVE_STREAMOFF
+
+#ifdef CONFIG_VIDEO_IMPROVE_STREAMOFF
+	do_gettimeofday(&state->stream_time.before_time);
+	state->need_wait_streamoff = 1;
+#else
 	debug_msleep(state->pdata->streamoff_delay);
 #endif
 	return 0;
@@ -912,6 +979,9 @@ static int sr200pc20_init(struct v4l2_subdev *sd, u32 val)
 
 	cam_trace("E\n");
 
+	err = sr200pc20_init_regs(sd);
+	CHECK_ERR_N_MSG(err, "failed to indentify sensor chip\n");
+
 	/* set initial regster value */
 	if (state->sensor_mode == SENSOR_CAMERA) {
 		if (!state->vt_mode) {
@@ -922,27 +992,28 @@ static int sr200pc20_init(struct v4l2_subdev *sd, u32 val)
 			cam_info("load camera WIFI VT call setting\n");
 			err = sr200pc20_set_from_table(sd, "init_vt",
 					&state->regs->init_vt, 1, 0);
-			}
+		}
 	} else {
 			cam_info("load recording setting\n");
 			err = sr200pc20_set_from_table(sd, "init_recording",
 					&state->regs->init_recording, 1, 0);
 	}
-	CHECK_ERR_N_MSG(err, "failed to init. err=%d\n", err);
+	CHECK_ERR_N_MSG(err, "failed to initialize camera device\n");
 
-	/* We stop stream-output from sensor when starting camera. */
-	if (unlikely(state->pdata->is_mipi)) {
-		err = sr200pc20_control_stream(sd, STREAM_STOP);
-		CHECK_ERR(err);
-	}
+	state->first_preview = 1;
+	state->initialized = 1;
 
-	if (state->vt_mode && (state->req_fps != state->set_fps)) {
+	if (state->req_fps >= 0) {
 		err = sr200pc20_set_frame_rate(sd, state->req_fps);
 		CHECK_ERR(err);
-		state->set_fps = state->req_fps;
 	}
 
-	state->initialized = 1;
+#ifdef SUPPORT_FACTORY_TEST
+	if (state->check_dataline) {
+		err = sr200pc20_check_dataline(sd, 1);
+		CHECK_ERR(err);
+	}
+#endif
 
 	return 0;
 }
@@ -958,7 +1029,6 @@ static int sr200pc20_init(struct v4l2_subdev *sd, u32 val)
 static int sr200pc20_s_config(struct v4l2_subdev *sd,
 		int irq, void *platform_data)
 {
-	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	struct sr200pc20_state *state = to_state(sd);
 #ifdef CONFIG_LOAD_FILE
 	int err = 0;
@@ -967,9 +1037,9 @@ static int sr200pc20_s_config(struct v4l2_subdev *sd,
 	cam_trace("E\n");
 
 	state->initialized = 0;
-	state->req_fps = state->set_fps = 8;
+	state->fps = 0;
+	state->req_fps = -1;
 	state->sensor_mode = SENSOR_CAMERA;
-	state->regs = &reg_datas;
 
 	if (!platform_data) {
 		cam_err("%s: ERROR, no platform data\n", __func__);
@@ -1052,9 +1122,14 @@ static int sr200pc20_s_stream(struct v4l2_subdev *sd, int enable)
 		cam_dbg("%s: do nothing(movie off)!!\n", __func__);
 		break;
 
+#ifdef CONFIG_VIDEO_IMPROVE_STREAMOFF
+	case STREAM_MODE_WAIT_OFF:
+		err = sr200pc20_wait_steamoff(sd);
+		break;
+#endif
 	default:
 		cam_err("%s: ERROR, Invalid stream mode %d\n",
-						__func__, enable);
+					__func__, enable);
 		err = -EINVAL;
 		break;
 	}
@@ -1099,7 +1174,7 @@ static int sr200pc20_set_blur(struct v4l2_subdev *sd, s32 val)
 		return 0;
 #endif
 	if (unlikely(val < BLUR_LEVEL_0 || val >= BLUR_LEVEL_MAX)) {
-		cam_err("%s: ERROR, Invalid blur(%d)\n", __func__, val);
+		cam_err("%s: ERROR, invalid blur(%d)\n", __func__, val);
 		return -EINVAL;
 	}
 
@@ -1117,18 +1192,24 @@ static int sr200pc20_g_ctrl(struct v4l2_subdev *sd, struct v4l2_control *ctrl)
 
 	cam_dbg("g_ctrl: id = %d\n", ctrl->id - V4L2_CID_PRIVATE_BASE);
 
+	mutex_lock(&state->ctrl_lock);
+
 	switch (ctrl->id) {
 	case V4L2_CID_CAMERA_EXIF_EXPTIME:
 		ctrl->value = state->exif.exp_time_den;
 		break;
+
 	case V4L2_CID_CAMERA_EXIF_ISO:
 		ctrl->value = state->exif.iso;
 		break;
+
 	default:
 		cam_err("%s: ERROR, no such control id %d\n",
 			__func__, ctrl->id - V4L2_CID_PRIVATE_BASE);
 		break;
 	}
+
+	mutex_unlock(&state->ctrl_lock);
 
 	return err;
 }
@@ -1139,7 +1220,7 @@ static int sr200pc20_s_ctrl(struct v4l2_subdev *sd, struct v4l2_control *ctrl)
 	struct sr200pc20_state *state = to_state(sd);
 	int err = 0;
 
-	cam_info("s_ctrl: id = %d, value=%d\n",
+	cam_dbg("s_ctrl: id = %d, value=%d\n",
 		ctrl->id - V4L2_CID_PRIVATE_BASE, ctrl->value);
 
 	if ((ctrl->id != V4L2_CID_CAMERA_CHECK_DATALINE)
@@ -1149,6 +1230,8 @@ static int sr200pc20_s_ctrl(struct v4l2_subdev *sd, struct v4l2_control *ctrl)
 		cam_warn("%s: WARNING, camera not initialized\n", __func__);
 		return 0;
 	}
+
+	mutex_lock(&state->ctrl_lock);
 
 	switch (ctrl->id) {
 	case V4L2_CID_CAMERA_BRIGHTNESS:
@@ -1182,11 +1265,13 @@ static int sr200pc20_s_ctrl(struct v4l2_subdev *sd, struct v4l2_control *ctrl)
 		break;
 #endif
 	default:
-		cam_err("%s: ERROR, Not supported ctrl-ID(%d)\n",
+		cam_err("%s: ERROR, not supported ctrl-ID(%d)\n",
 			__func__, ctrl->id - V4L2_CID_PRIVATE_BASE);
 		/* no errors return.*/
 		break;
 	}
+
+	mutex_unlock(&state->ctrl_lock);
 
 	cam_trace("X\n");
 	return 0;
@@ -1242,8 +1327,10 @@ static int sr200pc20_probe(struct i2c_client *client,
 	cam_trace("E\n");
 
 	state = kzalloc(sizeof(struct sr200pc20_state), GFP_KERNEL);
-	if (state == NULL)
+	if (unlikely(state == NULL))
 		return -ENOMEM;
+
+	mutex_init(&state->ctrl_lock);
 
 	sd = &state->sd;
 	strcpy(sd->name, SR200PC20_DRIVER_NAME);

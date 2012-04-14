@@ -82,7 +82,7 @@ static void modemctl_cfg_gpio(void)
 		pr_err("fail to request gpio %s\n", "220_PMIC_PWRON");
 	else {
 		gpio_direction_output(gpio_phone_on, 0);
-		s3c_gpio_setpull(gpio_phone_on, S3C_GPIO_PULL_NONE);
+		s3c_gpio_setpull(gpio_phone_on, S3C_GPIO_PULL_DOWN);
 	}
 
 	err = gpio_request(gpio_phone_off, "LTE_PS_HOLD_OFF");
@@ -90,7 +90,7 @@ static void modemctl_cfg_gpio(void)
 		pr_err("fail to request gpio %s\n", "LTE_PS_HOLD_OFF");
 	else {
 		gpio_direction_output(gpio_phone_off, 0);
-		s3c_gpio_setpull(gpio_phone_off, S3C_GPIO_PULL_NONE);
+		s3c_gpio_setpull(gpio_phone_off, S3C_GPIO_PULL_DOWN);
 	}
 
 	err = gpio_request(gpio_cp_reset, "CMC_RST");
@@ -98,7 +98,7 @@ static void modemctl_cfg_gpio(void)
 		pr_err("fail to request gpio %s\n", "CMC_RST");
 	else {
 		gpio_direction_output(gpio_cp_reset, 0);
-		s3c_gpio_setpull(gpio_cp_reset, S3C_GPIO_PULL_NONE);
+		s3c_gpio_setpull(gpio_cp_reset, S3C_GPIO_PULL_DOWN);
 	}
 
 	err = gpio_request(gpio_slave_wakeup, "AP2LTE_WAKEUP");
@@ -124,7 +124,7 @@ static void modemctl_cfg_gpio(void)
 	if (err)
 		pr_err("fail to request gpio %s\n", "AP2LTE_STATUS");
 	else {
-		gpio_direction_output(gpio_host_active, 0);
+		gpio_direction_output(gpio_host_active, 1);
 		s3c_gpio_setpull(gpio_host_active, S3C_GPIO_PULL_NONE);
 	}
 

@@ -20,15 +20,18 @@
 #include "lte_modem_bootloader.h"
 #include <mach/gpio.h>
 
+#include <linux/pm_runtime.h>
+
 #define LEN_XMIT_DELEY	100
 
-#ifdef AIRPLAIN_MODE_TEST
-int lte_airplain_mode;
-#endif
+extern s5pv210_usb_port0_power(int enable);
+extern struct platform_device s3c_device_usb_ehci;
 
-#ifdef LTE_SILENT_RESET_TEST
+extern int mc_get_active_state();
+extern int mc_control_active_state(int val);
+
+int lte_airplain_mode;
 int lte_silent_reset_mode;
-#endif
 
 enum xmit_bootloader_status {
 	XMIT_BOOT_DOWNLOAD_NOT_YET = 0,
@@ -42,6 +45,7 @@ struct lte_modem_bootloader {
 	struct mutex lock;
 
 	unsigned gpio_lte2ap_status;
+	unsigned gpio_lte_active;
 
 	enum xmit_bootloader_status xmit_status;
 };
@@ -115,6 +119,12 @@ int get_lte2ap_status(struct lte_modem_bootloader *loader)
 	return gpio_get_value(loader->gpio_lte2ap_status);
 }
 
+static inline
+int get_lte_active(struct lte_modem_bootloader *loader)
+{
+	return gpio_get_value(loader->gpio_lte_active);
+}
+
 static
 int bootloader_open(struct inode *inode, struct file *flip)
 {
@@ -133,9 +143,21 @@ long bootloader_ioctl(struct file *flip,
 	struct lte_modem_bootloader_param param;
 	struct lte_modem_bootloader *loader = flip->private_data;
 
+	struct usb_hcd *ehci_hcd = platform_get_drvdata(&s3c_device_usb_ehci);
+
 	mutex_lock(&loader->lock);
 	switch (cmd) {
 	case IOCTL_LTE_MODEM_XMIT_BOOT:
+
+		if (loader->xmit_status == XMIT_BOOT_DOWNLOAD_NOT_YET) {
+			if (!mc_get_active_state()) {
+				mc_control_active_state(1);
+			}
+
+			lte_silent_reset_mode = 1;
+			s5pv210_usb_port0_power(0);
+			pm_runtime_get_sync(&s3c_device_usb_ehci.dev);
+		}
 
 		ret = copy_from_user(&param, (const void __user *)arg,
 				sizeof(param));
@@ -143,6 +165,12 @@ long bootloader_ioctl(struct file *flip,
 			dev_err(&loader->spi_dev->dev, "%s - can not copy userdata\n",
 					__func__);
 			ret = -EFAULT;
+			goto exit_err;
+		}
+
+		if (param.buf == NULL) {
+			dev_err(&loader->spi_dev->dev, "%s - incorrect userdata\n",
+					__func__);
 			goto exit_err;
 		}
 
@@ -155,8 +183,10 @@ long bootloader_ioctl(struct file *flip,
 		else
 			if (loader->xmit_status == XMIT_BOOT_DOWNLOAD_NOT_YET)
 				loader->xmit_status = XMIT_BOOTLOADER_OK;
-			else if (loader->xmit_status == XMIT_BOOTLOADER_OK)
+			else if (loader->xmit_status == XMIT_BOOTLOADER_OK) {
 				loader->xmit_status = XMIT_BOOT_DOWNLOAD_NOT_YET;
+				s5pv210_usb_port0_power(1);
+			}
 
 		break;
 
@@ -167,7 +197,13 @@ long bootloader_ioctl(struct file *flip,
 
 		break;
 
-#ifdef AIRPLAIN_MODE_TEST
+	case IOCTL_LTE_MODEM_LTE_ACTIVE:
+		status = get_lte_active(loader);
+		ret = copy_to_user((unsigned int *)arg, &status,
+				sizeof(status));
+
+		break;
+
 	case IOCTL_LTE_MODEM_AIRPLAIN_ON:
 		lte_airplain_mode = 1;
 		dev_err(&loader->spi_dev->dev, "IOCTL_LTE_MODEM LPM_ON\n");
@@ -177,9 +213,9 @@ long bootloader_ioctl(struct file *flip,
 		dev_err(&loader->spi_dev->dev, "IOCTL_LTE_MODEM LPM_OFF\n");
 		lte_airplain_mode = 0;
 		break;
-#endif
-#ifdef LTE_SILENT_RESET_TEST
+
 	case IOCTL_LTE_SILENT_RESET_ON:
+
 		lte_silent_reset_mode = 1;
 		dev_err(&loader->spi_dev->dev, "IOCTL_LTE_SILENT_RESET_ON\n");
 		break;
@@ -188,7 +224,7 @@ long bootloader_ioctl(struct file *flip,
 		dev_err(&loader->spi_dev->dev, "IOCTL_LTE_SILENT_RESET_OFF\n");
 		lte_silent_reset_mode = 0;
 		break;
-#endif
+
 	default:
 		dev_err(&loader->spi_dev->dev, "ioctl cmd error\n");
 		ret = -ENOIOCTLCMD;
@@ -270,16 +306,16 @@ int __devinit lte_modem_bootloader_probe(struct spi_device *spi)
 	}
 
 	pdata = (struct lte_modem_bootloader_platform_data *)spi->dev.platform_data;
+
 	loader->gpio_lte2ap_status = pdata->gpio_lte2ap_status;
+	loader->gpio_lte_active = pdata->gpio_lte_active;
+	loader->xmit_status = XMIT_BOOT_DOWNLOAD_NOT_YET;
 
 	ret = gpio_setup(loader);
 	if (ret) {
 		pr_err("failed to set gpio for lte_modem_boot_loader\n");
 		goto err_setup;
 	}
-
-	loader->gpio_lte2ap_status = pdata->gpio_lte2ap_status;
-	loader->xmit_status = XMIT_BOOT_DOWNLOAD_NOT_YET;
 
 	spi_set_drvdata(spi, loader);
 
@@ -294,9 +330,8 @@ int __devinit lte_modem_bootloader_probe(struct spi_device *spi)
 
 	pr_info("lte_modem_bootloader successfully probed\n");
 
-#ifdef AIRPLAIN_MODE_TEST
 	lte_airplain_mode = 0;
-#endif
+
 	return 0;
 
 err_setup:

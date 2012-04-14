@@ -50,3 +50,4 @@ obj-$(CONFIG_SENSORS_AK8975)	+= ak8975.o
 obj-$(CONFIG_SENSORS_KXSD9)		+= kxsd9.o
 obj-$(CONFIG_SENSORS_KXTF9)		+= kxtf9.o
 obj-$(CONFIG_OPTICAL_GP2A)		+= gp2a.o
+obj-$(CONFIG_SENSORS_AL3201)		+= al3201.o

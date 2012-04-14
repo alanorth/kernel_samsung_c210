@@ -300,7 +300,7 @@ static void check_acc_dock(struct acc_con_info *acc)
 			("[30PIN] keyboard dock station attached!!!");
 			switch_set_state(&acc->dock_switch,
 				UEVENT_DOCK_KEYBOARD);
-		}else
+		} else
 #endif
 		{
 #ifdef CONFIG_MHL_SII9234

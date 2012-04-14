@@ -1526,11 +1526,12 @@ int pl330_update(const struct pl330_info *pi)
 			u32 inten = readl(regs + INTEN);
 			int active;
 
-			/* Clear the event */
-			if (inten & (1 << ev))
-				writel(1 << ev, regs + INTCLR);
-
 			ret = 1;
+
+			/* Clear the event */
+			writel(1 << ev, regs + INTCLR);
+			if (!(inten & (1 << ev)))
+				continue;
 
 			id = pl330->events[ev];
 			if (id == -1)
@@ -1902,7 +1903,7 @@ static int dmac_alloc_resources(struct pl330_dmac *pl330)
 		return -ENOMEM;
 	}
 
-	if(pi->va_mode)
+	if (pi->va_mode)
 		pl330->mcode_dma = (u32)pl330->mcode_cpu;
 	else
 		pl330->mcode_dma = pl330->mcode_bus;

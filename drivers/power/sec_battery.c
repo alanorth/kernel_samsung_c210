@@ -92,6 +92,7 @@ struct battery_info {
 	u32 charging_source;	/* 0: no cable, 1:usb, 2:AC */
 	u32 charging_enabled;	/* 0: Disable, 1: Enable */
 	u32 charging_current;	/* Charging current */
+	u32 batt_full_count;	/* full checked count */
 	u32 batt_health;	/* Battery Health (Authority) */
 	u32 batt_is_full;       /* 0 : Not full 1: Full */
 	u32 batt_is_recharging; /* 0 : Not recharging 1: Recharging */
@@ -112,6 +113,7 @@ struct battery_data {
 	struct work_struct	cable_work;
 	struct delayed_work	TA_work;
 	struct delayed_work	fuelgauge_work;
+	struct delayed_work	fuelgauge_recovery_work;
 	struct delayed_work	fullcharging_work;
 	struct delayed_work	full_comp_work;
 	struct alarm		alarm;
@@ -147,6 +149,7 @@ struct battery_data {
 	bool is_first_check;
 	int cable_detect_source;	/* 0:Default, 1:Only charger, 2:Only PMIC */
 	int pmic_cable_state;
+	bool is_low_batt_alarm;
 };
 
 struct battery_data *debug_batterydata;
@@ -179,7 +182,8 @@ extern void reset_low_batt_comp_cnt(void);
 extern int get_fuelgauge_value(int data);
 extern struct max17042_chip *max17042_chip_data;
 
-static int check_ta_from_pmic(struct battery_data *battery)
+
+static int get_cached_charging_status(struct battery_data *battery)
 {
 	struct power_supply *psy = power_supply_get_by_name("max8997-charger");
 	union power_supply_propval value;
@@ -225,7 +229,7 @@ static int check_ta_conn(struct battery_data *battery)
 	u32 value;
 
 	if (battery->cable_detect_source == 2) {
-		value = check_ta_from_pmic(battery);
+		value = get_cached_charging_status(battery);
 		pr_info("Cable detect from PMIC instead of TA_nConnected(%d)\n", value);
 		return value;
 	}
@@ -259,6 +263,9 @@ static void sec_set_charging(struct battery_data *battery, int charger_type)
 		battery->info.charging_current = CHARGING_CURRENT_HIGH;
 		break;
 	default:
+		/* For P8 Audio station, the charging current driven by TA
+		path is not as per the required spec hence we drive the
+		input charging current by USB path for Sound Station.*/
 		gpio_set_value(battery->pdata->charger.currentset_line, 0);
 		battery->info.charging_current = CHARGING_CURRENT_LOW;
 		break;
@@ -343,11 +350,61 @@ enum charger_type sec_check_dedicated_charger(struct battery_data *battery)
 	return result;
 }
 
+static
+enum charger_type sec_get_dedicted_charger_type(struct battery_data *battery)
+{
+	/* N.B. If check_ta_conn() is true something valid is
+	connceted to the device for charging.
+	By default this something is considered to be USB.*/
+	enum charger_type result = CHARGER_USB;
+	int avg_vol = 0;
+	int adc_1, adc_2;
+	int vol_1, vol_2;
+
+	mutex_lock(&battery->work_lock);
+
+	/* ADC check margin (300~500ms) */
+	msleep(300);
+
+	usb_switch_lock();
+	usb_switch_set_path(USB_PATH_ADCCHECK);
+
+#if defined(CONFIG_MACH_P8LTE_REV00) || defined(CONFIG_MACH_P8_REV00) \
+	|| defined(CONFIG_MACH_P8_REV01) || defined(P4_CHARGING_FEATURE_01)
+	/* ADC values Update Margin */
+	msleep(30);
+#endif
+
+	adc_1 = s3c_adc_read(battery->padc, 5);
+	adc_2 = s3c_adc_read(battery->padc, 5);
+
+	vol_1 = (adc_1 * 3300) / 4095;
+	vol_2 = (adc_2 * 3300) / 4095;
+
+	avg_vol = (vol_1 + vol_2)/2;
+
+	if ((avg_vol > 800) && (avg_vol < 1800))
+		result = CHARGER_AC;                      /* TA connected. */
+	else if ((avg_vol > 550) && (avg_vol < 700))
+		result = CHARGER_MISC;  /* Samsung Audio Station connected.*/
+	else
+		result = CHARGER_USB;
+
+	usb_switch_clr_path(USB_PATH_ADCCHECK);
+	usb_switch_unlock();
+
+	mutex_unlock(&battery->work_lock);
+
+	pr_err("%s : result(%d), avg_vol(%d)\n", __func__, result, avg_vol);
+	return result;
+}
+
 static void sec_get_cable_status(struct battery_data *battery)
 {
 	if (check_ta_conn(battery)) {
 		battery->current_cable_status =
-			sec_check_dedicated_charger(battery);
+			sec_get_dedicted_charger_type(battery);
+		battery->info.batt_full_count = 0;
 	} else {
 		battery->current_cable_status = CHARGER_BATTERY;
 		battery->info.batt_improper_ta = 0;
@@ -527,7 +584,8 @@ static int sec_get_bat_level(struct power_supply *bat_ps)
 	/* Algorithm for reducing time to fully charged (from MAXIM) */
 	if (battery->info.charging_enabled &&	/* Charging is enabled */
 		!battery->info.batt_is_recharging &&	/* Not Recharging */
-		battery->info.charging_source == CHARGER_AC &&	/* Only AC (Not USB cable) */
+		((battery->info.charging_source == CHARGER_AC) || \
+		(battery->info.charging_source == CHARGER_MISC)) &&
 		!battery->is_first_check &&	/* Skip when first check after boot up */
 		(fg_vfsoc > 70 && (fg_current > 20 && fg_current < 250) &&
 		(avg_current > 20 && avg_current < 260))) {
@@ -561,7 +619,8 @@ static int sec_get_bat_level(struct power_supply *bat_ps)
 		}
 	}
 
-	if (fg_vcell <= battery->pdata->recharge_voltage) {
+	if ((fg_vcell <= battery->pdata->recharge_voltage) ||
+		(fg_vcell <= 4000)) {
 		if (battery->info.batt_is_full
 			|| battery->info.abstimer_is_active
 			&& !battery->info.charging_enabled) {
@@ -584,50 +643,80 @@ static int sec_get_bat_level(struct power_supply *bat_ps)
 	if (!battery->pdata->check_jig_status() && !battery->info.charging_enabled)
 		fg_soc = low_batt_compensation(fg_soc, fg_vcell, fg_current);
 
-    // Compensation for Charging cut off current in P8. On P8 we increase the charging current to 1.8A
-    // to complete charging in spec time. This causes the cut-off/ termination current to be high and
-    // hence to set the charging cut -off current to expected value we control it through ADC channel 6 of AP.
-    // Due to some prob in HW sometimes the CURRENT_MEA goes below V_TOP_OFF even for very low SOCs hence
-    // check for CURRENT_MEA signal only at a very later stage of charging process.
-    // For now this code is enabled only for P8-LTE. Enable it for other P8 Models only if HW is updated.
+	/* Compensation for Charging cut off current in P8.
+	* On P8 we increase the charging current to 1.8A
+	* to complete charging in spec time.
+	* This causes the cut-off/ termination current to be high and
+	* hence to set the charging cut -off current to expected value
+	* we control it through ADC channel 6 of AP.
+	* Due to some prob in HW sometimes the CURRENT_MEA goes
+	* below V_TOP_OFF even for very low SOCs hence
+	* check for CURRENT_MEA signal only at
+	* a very later stage of charging process.
+	* For now this code is enabled only for P8-LTE.
+	* Enable it for other P8 Models only if HW is updated.
+	*/
 #ifdef CONFIG_MACH_P8LTE_REV00
-    if ((battery->info.charging_source == CHARGER_AC) &&  // Charging is done using TA only.
-        (battery->info.batt_improper_ta == 0) &&          // TA should be a proper connection.
-        (battery->info.charging_enabled) &&               // Charging should be Enabled.
-        (battery->info.batt_is_recharging == 0) &&        // Should not be in Recharging Path.
-        (fg_vcell > 4130))                                // VCELL > 4.13V.
-    {
-        // Read ADC Voltage.
-        if (battery->padc)
-        {
-            int Viset = s3c_adc_read(battery->padc, SEC_CURR_MEA_ADC_CH); // in mV
+	/* Charging is done using TA only. */
+	/* TA should be a proper connection. */
+	/* Charging should be Enabled. */
+	/* Should not be in Recharging Path. */
+	/* VCELL > 4.19V. */
+	/* VFSOC > 72. 72 * 1.333 = 95.976 */
+	if ((battery->info.charging_source == CHARGER_AC) &&
+		(battery->info.batt_improper_ta == 0) &&
+		(battery->info.charging_enabled) &&
+		(battery->info.batt_is_recharging == 0) &&
+		(fg_vcell > 4190) &&
+		(fg_vfsoc > 72)) {
+		/* Read ADC Voltage. */
+		if (battery->padc) {
+			int Viset = s3c_adc_read(battery->padc,
+				SEC_CURR_MEA_ADC_CH); /* in mV */
 
-            if (!Viset)
-            {
-                // Connecting TA after boot shows latency in ADC update for the first time.
-                // Wait for ~700ms the ADC value to be updated. This is just a conservative number.
-                pr_info(" %s: Waiting for the ADC value on Channel 6 to be updated \n", __func__);
-                mdelay(700);
-                Viset = s3c_adc_read(battery->padc, SEC_CURR_MEA_ADC_CH);
-            }
+			if (!Viset) {
+				/* Connecting TA after boot shows latency
+				* in ADC update for the first time.
+				* Wait for ~700ms the ADC value to be updated.
+				* This is just a conservative number.
+				*/
+				pr_info(
+				"%s: Waiting for the ADC value on Channel 6 to be updated\n",
+				__func__);
+				mdelay(700);
+				Viset = s3c_adc_read(battery->padc,
+					SEC_CURR_MEA_ADC_CH);
+			}
 
-            if (Viset < V_TOP_OFF)
-            {
-                // Disable the charging process.
-                pr_err(" %s: Charging Disabled: V-topoff(%d) is more than V-Iset(%d) \n", __func__, V_TOP_OFF, Viset);
-                sec_cable_charging(battery);
-            }
-        }
-        else
-        {
-            pr_err("%s : Cannot read the current measurement ADC regsiter \n", __func__);
-        }
-    }
+			if (Viset < V_TOP_OFF) {
+				if (battery->info.batt_full_count++ <
+					COUNT_TOP_OFF) {
+					pr_info(
+					"%s: Charging current is lower than top-off current\n",
+					__func__);
+				} else {
+					/* Disable the charging process. */
+					pr_err(
+					"%s: Charging Disabled: V-topoff(%d) is more than V-Iset(%d)\n",
+					__func__, V_TOP_OFF, Viset);
+					battery->info.batt_full_count = 0;
+					sec_cable_charging(battery);
+				}
+			} else
+				battery->info.batt_full_count = 0;
+		} else {
+			pr_err(
+			"%s : Cannot read the current measurement ADC regsiter\n",
+			__func__);
+		}
+	}
 #endif
 
 __end__:
-	pr_debug("fg_vcell = %d, fg_soc = %d, is_full = %d",
-		fg_vcell, fg_soc, battery->info.batt_is_full);
+	pr_debug("fg_vcell = %d, fg_soc = %d, is_full = %d, full_count = %d",
+		fg_vcell, fg_soc,
+		battery->info.batt_is_full,
+		battery->info.batt_full_count);
 
 	if (battery->is_first_check)
 		battery->is_first_check = false;
@@ -700,6 +789,8 @@ static void sec_set_chg_current(struct battery_data *battery, int set_current)
 #if defined(P8_CHARGING_FEATURE_01)
 	if ((set_current > CHARGING_CURRENT_HIGH_LOW_STANDARD) && (battery->current_cable_status == CHARGER_AC))
 		sec_set_charging(battery, CHARGER_AC);
+	else if (battery->current_cable_status == CHARGER_MISC)
+		sec_set_charging(battery, CHARGER_MISC);
 	else
 		sec_set_charging(battery, CHARGER_USB);
 #else	/* P4C H/W rev0.0 does not support yet */
@@ -1011,7 +1102,10 @@ static int sec_ac_get_property(struct power_supply *ac_ps,
 
 	switch (psp) {
 	case POWER_SUPPLY_PROP_ONLINE:
-		val->intval = (charger == CHARGER_AC ? 1 : 0);
+		if ((charger == CHARGER_AC) || (charger == CHARGER_MISC))
+			val->intval = 1;
+		else
+			val->intval = 0;
 		break;
 	default:
 		return -EINVAL;
@@ -1357,6 +1451,10 @@ static int sec_cable_status_update(struct battery_data *battery, int status)
 	case CHARGER_MISC:
 		pr_info("cable MISC");
 		battery->info.charging_source = CHARGER_AC;
+#if defined(CONFIG_MACH_P8LTE_REV00)  || defined(CONFIG_MACH_P8_REV00) \
+	|| defined(CONFIG_MACH_P8_REV01)
+		battery->info.charging_source = CHARGER_MISC;
+#endif
 		break;
 	case CHARGER_DISCHARGE:
 		pr_info("Discharge");
@@ -1368,7 +1466,8 @@ static int sec_cable_status_update(struct battery_data *battery, int status)
 	}
 	check_usb_status = source = battery->info.charging_source;
 
-	if (source == CHARGER_USB || source == CHARGER_AC) {
+	if (source == CHARGER_USB || source == CHARGER_AC || \
+		source == CHARGER_MISC) {
 		wake_lock(&battery->vbus_wake_lock);
 	} else {
 		/* give userspace some time to see the uevent and update
@@ -1409,16 +1508,16 @@ static void sec_bat_status_update(struct power_supply *bat_ps)
 	old_is_full = battery->info.batt_is_full;
 
 	battery->info.batt_temp = sec_get_bat_temp(bat_ps);
-	battery->info.level = sec_get_bat_level(bat_ps);
+	if (!battery->is_low_batt_alarm)
+		battery->info.level = sec_get_bat_level(bat_ps);
 
-#if !defined(CONFIG_MACH_P8LTE_REV00) && !defined(CONFIG_MACH_P8_REV00) && !defined(CONFIG_MACH_P8_REV01)
 	if (!battery->info.charging_enabled &&
 			!battery->info.batt_is_full &&
 			!battery->pdata->check_jig_status()) {
 		if (battery->info.level > old_level)
 			battery->info.level = old_level;
 	}
-#endif
+
 	battery->info.batt_vol = sec_get_bat_vol(bat_ps);
 
 	if (battery->pdata->get_charging_state)
@@ -1427,7 +1526,7 @@ static void sec_bat_status_update(struct power_supply *bat_ps)
 	power_supply_changed(bat_ps);
 	pr_debug("call power_supply_changed");
 
-	pr_info("BAT : soc(%d), vcell(%dmV), curr(%dmA), temp(%d.%d), chg(%d), full(%d), rechg(%d), cable(%d)\n",
+	pr_info("BAT : soc(%d), vcell(%dmV), curr(%dmA), temp(%d.%d), chg(%d), full(%d), rechg(%d), lowbat(%d), cable(%d)\n",
 		battery->info.level,
 		battery->info.batt_vol,
 		battery->info.batt_current,
@@ -1436,6 +1535,7 @@ static void sec_bat_status_update(struct power_supply *bat_ps)
 		battery->info.charging_enabled,
 		battery->info.batt_is_full,
 		battery->info.batt_is_recharging,
+		battery->is_low_batt_alarm,
 		battery->current_cable_status);
 
 	mutex_unlock(&battery->work_lock);
@@ -1448,6 +1548,11 @@ static void sec_cable_check_status(struct battery_data *battery)
 	mutex_lock(&battery->work_lock);
 
 	if (get_charger_status(battery)) {
+		pr_info("%s: Returning to Normal discharge path.\n",
+			__func__);
+		cancel_delayed_work(&battery->fuelgauge_recovery_work);
+		battery->is_low_batt_alarm = false;
+
 		if (battery->info.batt_health != POWER_SUPPLY_HEALTH_GOOD) {
 			pr_info("Unhealth battery state! ");
 			status = CHARGER_DISCHARGE;
@@ -1587,27 +1692,84 @@ static irqreturn_t low_battery_isr(int irq, void *arg)
 	return IRQ_HANDLED;
 }
 
+int fuelgauge_recovery_handler(struct work_struct *work)
+{
+	struct battery_data *battery =
+		container_of(work, struct battery_data,
+		fuelgauge_recovery_work.work);
+	int current_soc;
+
+	if (battery->info.level > 0) {
+		pr_err("%s: Reduce the Reported SOC by 1 unit, wait for 30 sec.\n",
+		__func__);
+		wake_lock_timeout(&battery->vbus_wake_lock, HZ);
+		current_soc = get_fuelgauge_value(FG_LEVEL);
+		if (current_soc) {
+			pr_info("%s: Returning to Normal discharge path.\n",
+				__func__);
+			pr_info(" Actual SOC(%d) non-zero.\n",
+			current_soc);
+			battery->is_low_batt_alarm = false;
+			return 0;
+		} else {
+			int AVSoc = 0;
+			AVSoc = get_fuelgauge_value(FG_AV_SOC);
+
+			if (battery->info.level > AVSoc) {
+				battery->info.level--;
+				pr_err("%s: New Reduced Reported SOC  (%d).\n",
+					__func__, battery->info.level);
+			} else {
+				pr_err("%s:Holding on to last Reported SOC(%d) AvSoc(%d).\n",
+					__func__, battery->info.level, AVSoc);
+			}
+
+			power_supply_changed(&battery->psy_battery);
+			queue_delayed_work(battery->sec_TA_workqueue,
+				&battery->fuelgauge_recovery_work,
+				msecs_to_jiffies(30000));
+		}
+	} else {
+		if (!get_charger_status(battery)) {
+			pr_err("Set battery level as 0, power off.\n");
+			battery->info.level = 0;
+			wake_lock_timeout(&battery->vbus_wake_lock, HZ);
+			power_supply_changed(&battery->psy_battery);
+		}
+	}
+}
+
 #define STABLE_LOW_BATTERY_DIFF	3
+#define STABLE_LOW_BATTERY_DIFF_LOWBATT	1
 int _low_battery_alarm_(struct battery_data *battery)
 {
-
 #if defined(CONFIG_MACH_P8LTE_REV00) || defined(CONFIG_MACH_P8_REV00) || defined(CONFIG_MACH_P8_REV01)
+	int overcurrent_limit_in_soc;
 	int current_soc = get_fuelgauge_value(FG_LEVEL);
-	pr_info("%s: soc=%d, new_soc=%d\n", __func__, battery->info.level, current_soc);
 
-	if ((battery->info.level - current_soc) > STABLE_LOW_BATTERY_DIFF) {
-		pr_info("Set battery level as 5");
-		battery->info.level = 5;
-		wake_lock_timeout(&battery->vbus_wake_lock, HZ);
-		power_supply_changed(&battery->psy_battery);
-		msleep(100);
+	if (battery->info.level <= STABLE_LOW_BATTERY_DIFF)
+		overcurrent_limit_in_soc = STABLE_LOW_BATTERY_DIFF_LOWBATT;
+	else
+		overcurrent_limit_in_soc = STABLE_LOW_BATTERY_DIFF;
 
-		return 0;
+	if ((battery->info.level - current_soc) > overcurrent_limit_in_soc) {
+		pr_info("%s: Abnormal Current Consumption jump by %d  units.\n",
+			__func__, ((battery->info.level - current_soc)));
+		pr_info("Last Reported SOC (%d).\n",
+				battery->info.level);
+
+		battery->is_low_batt_alarm = true;
+
+		if (battery->info.level > 0) {
+			queue_delayed_work(battery->sec_TA_workqueue,
+				&battery->fuelgauge_recovery_work, 0);
+			return 0;
+		}
 	}
 #endif
 
 	if (!get_charger_status(battery)) {
-		pr_info("Set battery level as 0, power off.");
+		pr_err("Set battery level as 0, power off.\n");
 		battery->info.level = 0;
 		wake_lock_timeout(&battery->vbus_wake_lock, HZ);
 		power_supply_changed(&battery->psy_battery);
@@ -1720,6 +1882,7 @@ static int __devinit sec_bat_probe(struct platform_device *pdev)
 	battery->info.batt_health = POWER_SUPPLY_HEALTH_GOOD;
 	battery->info.abstimer_is_active = 0;
 	battery->is_first_check = true;
+	battery->is_low_batt_alarm = false;
 
 	battery->psy_battery.name = "battery";
 	battery->psy_battery.type = POWER_SUPPLY_TYPE_BATTERY;
@@ -1762,9 +1925,12 @@ static int __devinit sec_bat_probe(struct platform_device *pdev)
 	INIT_WORK(&battery->battery_work, sec_bat_work);
 	INIT_WORK(&battery->cable_work, sec_cable_work);
 	INIT_DELAYED_WORK(&battery->fuelgauge_work, fuelgauge_work_handler);
+	INIT_DELAYED_WORK(&battery->fuelgauge_recovery_work,
+		fuelgauge_recovery_handler);
 	INIT_DELAYED_WORK(&battery->fullcharging_work, fullcharging_work_handler);
 	INIT_DELAYED_WORK(&battery->full_comp_work, full_comp_work_handler);
 	INIT_DELAYED_WORK(&battery->TA_work, sec_TA_work_handler);
+
 	battery->sec_TA_workqueue = create_singlethread_workqueue(
 		"sec_TA_workqueue");
 	if (!battery->sec_TA_workqueue) {
@@ -1840,7 +2006,8 @@ static int __devinit sec_bat_probe(struct platform_device *pdev)
 	mutex_unlock(&battery->work_lock);
 
 	/* before enable fullcharge interrupt, check fullcharge */
-	if (battery->info.charging_source == CHARGER_AC
+	if (((battery->info.charging_source == CHARGER_AC) ||
+		(battery->info.charging_source == CHARGER_MISC))
 		&& battery->info.charging_enabled
 		&& gpio_get_value(pdata->charger.fullcharge_line) == 1)
 		sec_cable_charging(battery);
@@ -1896,6 +2063,7 @@ static int __devexit sec_bat_remove(struct platform_device *pdev)
 
 	destroy_workqueue(battery->sec_TA_workqueue);
 	cancel_delayed_work(&battery->fuelgauge_work);
+	cancel_delayed_work(&battery->fuelgauge_recovery_work);
 	cancel_delayed_work(&battery->fullcharging_work);
 	cancel_delayed_work(&battery->full_comp_work);
 
