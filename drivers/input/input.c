@@ -1508,15 +1508,6 @@ static int input_dev_resume(struct device *dev)
 
 	mutex_lock(&input_dev->mutex);
 	input_dev_reset(input_dev, true);
-
-	/*
-	 * Keys that have been pressed at suspend time are unlikely
-	 * to be still pressed when we resume.
-	 */
-	spin_lock_irq(&input_dev->event_lock);
-	input_dev_release_keys(input_dev);
-	spin_unlock_irq(&input_dev->event_lock);
-
 	mutex_unlock(&input_dev->mutex);
 
 	return 0;

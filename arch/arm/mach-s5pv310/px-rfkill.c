@@ -37,7 +37,13 @@
 
 #define BT_SLEEP_ENABLE
 
+/* SS_BLUEZ_BT(changeon.park) 2011.10.31. */
+#if !defined(CONFIG_MACH_P8LTE_REV00)
 #define IRQ_BT_HOST_WAKE      IRQ_EINT(22)
+#else
+#define IRQ_BT_HOST_WAKE      IRQ_EINT(9)
+#endif
+/* SS_BLUEZ_BT(changeon.park) End */
 
 #ifndef	GPIO_LEVEL_LOW
 #define GPIO_LEVEL_LOW		0

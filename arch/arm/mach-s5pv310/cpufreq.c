@@ -258,7 +258,7 @@ static unsigned int freq_trans_table[][CPUFREQ_LEVEL_END] = {
 #define MAX_LOAD	100
 #define LIMIT_BUS_LOAD	(MAX_LOAD / 2)
 
-#define UP_THRESHOLD_DEFAULT	27
+#define UP_THRESHOLD_DEFAULT	25
 #define CPU_PMU_L0_THRESHOLD	10
 #define CPU_PMU_L1_THRESHOLD	5
 

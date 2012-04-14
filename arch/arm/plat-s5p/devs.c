@@ -646,23 +646,23 @@ EXPORT_SYMBOL(s5p_device_rotator);
 #ifdef CONFIG_KEYPAD_S3C
 /* Keypad interface */
 static struct resource s3c_keypad_resource[] = {
-        [0] = {
-                .start = S3C_PA_KEYPAD,
-                .end   = S3C_PA_KEYPAD+ S3C_SZ_KEYPAD - 1,
-                .flags = IORESOURCE_MEM,
-        },
-        [1] = {
-                .start = IRQ_KEYPAD,
-                .end   = IRQ_KEYPAD,
-                .flags = IORESOURCE_IRQ,
-        }
+	[0] = {
+		.start = S3C_PA_KEYPAD,
+		.end   = S3C_PA_KEYPAD + S3C_SZ_KEYPAD - 1,
+		.flags = IORESOURCE_MEM,
+	},
+	[1] = {
+		.start = IRQ_KEYPAD,
+		.end   = IRQ_KEYPAD,
+		.flags = IORESOURCE_IRQ,
+	}
 };
 
 struct platform_device s3c_device_keypad = {
-        .name             = "s3c-keypad",
-        .id               = -1,
-        .num_resources    = ARRAY_SIZE(s3c_keypad_resource),
-        .resource         = s3c_keypad_resource,
+	.name             = "s3c-keypad",
+	.id               = -1,
+	.num_resources    = ARRAY_SIZE(s3c_keypad_resource),
+	.resource         = s3c_keypad_resource,
 };
 
 EXPORT_SYMBOL(s3c_device_keypad);
@@ -915,9 +915,17 @@ static struct android_usb_product usb_products[] = {
 		.num_functions  = ARRAY_SIZE(usb_functions_acm),
 		.functions      = usb_functions_acm,
 		.multi_conf_functions[0] = usb_functions,
+#ifdef CONFIG_MACH_P8LTE_REV00
+		.multi_conf_functions[1] = NULL,
+#else
 		.multi_conf_functions[1] = usb_functions_acm,
+#endif
 		.num_multi_conf_functions[0] = ARRAY_SIZE(usb_functions),
+#ifdef CONFIG_MACH_P8LTE_REV00
+		.num_multi_conf_functions[1] = 0,
+#else
 		.num_multi_conf_functions[1] = ARRAY_SIZE(usb_functions_acm),
+#endif
 	},
 	{
 		.vendor_id      = S3C_VENDOR_ID,
@@ -974,16 +982,20 @@ static struct android_usb_product usb_products[] = {
 #endif
 };
 
-// serial number should be changed as real device for commercial release
-static char device_serial[MAX_USB_SERIAL_NUM]="0123456789ABCDEF";
+/* serial number should be changed as real device for commercial release */
+static char device_serial[MAX_USB_SERIAL_NUM] = "0123456789ABCDEF";
 /* standard android USB platform data */
 
-// Information should be changed as real product for commercial release
+/* Information should be changed as real product for commercial release */
 static struct android_usb_platform_data android_usb_pdata = {
 	.vendor_id		= S3C_VENDOR_ID,
 	.product_id		= S3C_PRODUCT_ID,
-	.manufacturer_name	= "Android",//"Samsung",
-	.product_name		= "Android",//"Samsung SMDKV210",
+	.manufacturer_name	= "Android",/* "Samsung", */
+#ifdef CONFIG_MACH_P8LTE_REV00
+	.product_name		= "Samsung SCH-i815",/* "Android", */
+#else
+	.product_name		= "Android",/* "Samsung SMDKV210", */
+#endif
 	.serial_number		= device_serial,
 	.num_products		= ARRAY_SIZE(usb_products),
 	.products		= usb_products,
@@ -1001,12 +1013,12 @@ struct platform_device s3c_device_android_usb = {
 EXPORT_SYMBOL(s3c_device_android_usb);
 
 static struct usb_mass_storage_platform_data ums_pdata = {
-	.vendor			= "Android   ",//"Samsung",
-	.product		= "UMS Composite",//"SMDKV210",
+	.vendor			= "Android   ",/* "Samsung", */
+	.product		= "UMS Composite",/* "SMDKV210", */
 	.release		= 1,
 	.nluns			= 1,
 };
-struct platform_device s3c_device_usb_mass_storage= {
+struct platform_device s3c_device_usb_mass_storage = {
 	.name	= "usb_mass_storage",
 	.id	= -1,
 	.dev	= {
@@ -1020,7 +1032,7 @@ static struct usb_ether_platform_data rndis_pdata = {
 	.vendorID       = S3C_VENDOR_ID,
 	.vendorDescr    = "Samsung",
 };
-struct platform_device s3c_device_rndis= {
+struct platform_device s3c_device_rndis = {
 	.name   = "rndis",
 	.id     = -1,
 	.dev    = {

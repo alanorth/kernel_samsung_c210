@@ -195,6 +195,7 @@ struct s5p_rp_info {
 	unsigned char *sbuf;			/* SBUF in DRAM */
 	unsigned long sbuf_pa;			/* Physical address */
 	unsigned long sbuf_fill_size;		/* Fill size */
+	int wbuf_full_log_enabled;		/* WBUF full log */
 
 	unsigned char *pcm_dump;		/* PCM dump buffer in DRAM */
 	unsigned long pcm_dump_pa;		/* Physical address */
@@ -488,6 +489,7 @@ static void s5p_rp_reset(void)
 	s5p_rp.decoding_started = 0;
 	s5p_rp.dram_in_use = 0;
 	s5p_rp.pcm_dump_idle = 0;
+	s5p_rp.wbuf_full_log_enabled = 1;
 #ifdef _USE_EOS_TIMEOUT_
 	s5p_rp.timeout_eos_enabled = 0;
 	s5p_rp.timeout_read_size = _BITSTREAM_SIZE_MAX_;
@@ -895,8 +897,11 @@ static ssize_t s5p_rp_write(struct file *file, const char *buffer,
 	mutex_unlock(&rp_mutex);
 
 	if (s5p_rp.wbuf_pos > s5p_rp.ibuf_size * 4) {
-		printk(KERN_ERR "S5P_RP: wbuf_pos is full (0x%08lX), frame(0x%08X)\n",
-			s5p_rp.wbuf_pos, readl(s5p_rp.commbox + RP_FRAME_INDEX));
+		if (s5p_rp.wbuf_full_log_enabled) {
+			s5p_rp.wbuf_full_log_enabled = 0;
+			printk(KERN_ERR "S5P_RP: wbuf_pos is full (0x%08lX), frame(0x%08X)\n",
+				s5p_rp.wbuf_pos, readl(s5p_rp.commbox + RP_FRAME_INDEX));
+		}
 		return 0;
 	} else if (size > s5p_rp.ibuf_size) {
 		printk(KERN_ERR "S5P_RP: wr size error (0x%08X)\n", size);

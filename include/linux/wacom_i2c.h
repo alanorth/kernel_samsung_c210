@@ -46,8 +46,9 @@
 #define EPEN_TOOL_RUBBER	0x221
 #define EPEN_STYLUS			0x22b
 #define EPEN_STYLUS2		0x22c
-
+/*
 #define WACOM_SLEEP_WITH_PEN_SLP
+*/
 #if !defined(WACOM_SLEEP_WITH_PEN_SLP)
 #define WACOM_SLEEP_WITH_PEN_LDO_EN
 #endif

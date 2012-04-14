@@ -244,13 +244,6 @@ static void smb136_set_charging_state(int en, int cable_status)
 			data = 0x54;
 			smb136_i2c_write(chg->client, SMB_ChargeCurrent, data);
 			udelay(10);
-
-			/* Disable Automatic Input Current Limit,
-			  * USBIN Current Limit to 700mA */
-			data = 0x06;
-			smb136_i2c_write(chg->client,
-				SMB_InputCurrentLimit, data);
-			udelay(10);
 			break;
 		case CABLE_TYPE_USB:
 		default:

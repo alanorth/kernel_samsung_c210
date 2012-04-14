@@ -104,7 +104,7 @@ static int s5pv310_pd_disable(struct device *dev)
 	static int boot_lcd0 = 1;
 	if (boot_lcd0) {
 		if (!strncmp(dev_name(dev), "samsung-pd.2", POWERDOMAIN_NAME_LEN)) {
-			printk(KERN_INFO "ldo0 not disable only initial booting");
+			printk(KERN_INFO "lcd0 not disable only initial booting");
 			boot_lcd0 = 0;
 			return 0;
 		}

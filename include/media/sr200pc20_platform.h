@@ -20,6 +20,6 @@ struct sr200pc20_platform_data {
 	u32 freq;	/* MCLK in KHz */
 
 	/* This SoC supports Parallel & CSI-2 */
-	u32 is_mipi;
-	u32 streamoff_delay;	/* ms */
+	u32 is_mipi;		/* set to 1 if mipi */
+	s32 streamoff_delay;	/* ms, type is signed */
 };

@@ -20,6 +20,7 @@
 
 #define	DMA_ADDR_INVALID	(~(dma_addr_t)0)
 #define S3C_UDC_WAKE_UNLOCK_DELAY msecs_to_jiffies(500)
+#define S3C_UDC_WAKE_UNLOCK_DELAY_100 msecs_to_jiffies(100)
 #include <linux/usb/composite.h>
 
 static u8 clear_feature_num;

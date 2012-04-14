@@ -79,7 +79,7 @@ int mc_prepare_resume(int);
 int mc_reconnect_gpio(void);
 
 int mc_control_active_state(int val);
-void mc_phone_active_irq_enable(int on);
+void mc_phone_active_irq_enable();
 
 void crash_event(int type);
 #endif /* __MODEM_CONTROL_H__ */

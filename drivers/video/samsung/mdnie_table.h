@@ -1,7 +1,7 @@
 #ifndef __MDNIE_TABLE_H__
 #define __MDNIE_TABLE_H__
 
-#include "s3cfb_mdnie.h"
+#include "mdnie.h"
 
 
 static const unsigned short tune_dynamic_gallery[] = {

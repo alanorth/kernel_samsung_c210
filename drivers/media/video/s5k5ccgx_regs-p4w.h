@@ -6848,7 +6848,7 @@ static const u32 s5k5ccgx_camcorder_set[] = {
 
 };
 
-static const u32 s5k5ccgx_update_preview_setting[] = {
+static const u32 s5k5ccgx_update_preview_reg[] = {
 	//PREVIEW
 	0x002A0208,
 	0x0F120000, //REG_TC_GP_ActivePrevConfig
@@ -6867,6 +6867,35 @@ static const u32 s5k5ccgx_update_preview_setting[] = {
 	0x0F120001, //REG_TC_GP_EnableCaptureChanged
 	0xFFFF0064, //Delay 100ms
 };
+
+static const u32 s5k5ccgx_update_hd_preview_reg[] = {
+	/* PREVIEW */
+	0x002A0208,
+	0x0F120000, /* REG_TC_GP_ActivePrevConfig */
+	0x002A0210,
+	0x0F120000, /* REG_TC_GP_ActiveCapConfig */
+	0x002A020C,
+	0x0F120001, /* REG_TC_GP_PrevOpenAfterChange */
+	0x002A01F4,
+	0x0F120001, /* REG_TC_GP_NewConfigSync */
+	0x002A020A,
+	0x0F120001, /* REG_TC_GP_PrevConfigChanged */
+	0x002A0212,
+	0x0F120001, /* REG_TC_GP_CapConfigChanged */
+	0x002A01E8,
+	0x0F120000, /* REG_TC_GP_EnableCapture */
+	0x0F120001, /* REG_TC_GP_EnableCaptureChanged */
+
+	/* TNP_Regs_bUseAccurateFR */
+	0x00287000,
+	0x002A3FE4,
+	0x0F120001, /* on/off TNP_Regs_bAccuDynamicFR */
+	0x0F1234A2, /* on/off TNP_Regs_usMinAccuDynamicFrTme */
+	0x0F1240FD, /* on/off TNP_Regs_usMaxAccuDynamicFrTme */
+
+	0xFFFF0064, /* Delay 100ms */
+};
+
 
 static const u32 s5k5ccgx_stream_stop_reg[] = {
 	0xFCFCD000,
@@ -10400,8 +10429,7 @@ static const u32 s5k5ccgx_1280_1024_Preview[] = {
 	0x0F120280,
 };
 
-#define S5K5CCGX_720P_INIT_REG s5k5ccgx_1280_720_Preview
-static const u32 s5k5ccgx_1280_720_Preview[] = {
+static const u32 s5k5ccgx_hd_init_reg[] = {
 	//****************************************/
 	0xFCFCD000,
 	//****************************************/
@@ -11940,8 +11968,7 @@ static const u32 s5k5ccgx_1280_720_Preview[] = {
 	// AF Scene Settings
 	0x002A151E,
 	0x0F120003, //#af_scene_usSaturatedScene
-	0x002A0648,
-	0x0F120000, //skl_af_bPregmOff gamma
+
 
 
 	//7. AF Lens Position Table Settings
@@ -11952,7 +11979,7 @@ static const u32 s5k5ccgx_1280_720_Preview[] = {
 	0x0F120034, //#af_pos_usTable_1_  51
 	0x0F120038, //#af_pos_usTable_2_  54
 	0x0F12003C, //#af_pos_usTable_3_  57
-	0x0F120030, //#af_pos_usTable_4_  61
+	0x0F120040, /* #af_pos_usTable_4_ 61 */
 	0x0F120044, //#af_pos_usTable_5_  65
 	0x0F120048, //#af_pos_usTable_6_  69
 	0x0F12004C, //#af_pos_usTable_7_  73
@@ -12263,24 +12290,24 @@ static const u32 s5k5ccgx_1280_720_Preview[] = {
 
 
 
-	//PREVIEW
-	0x002A0208,
-	0x0F120000, //REG_TC_GP_ActivePrevConfig
-	0x002A0210,
-	0x0F120000, //REG_TC_GP_ActiveCapConfig
-	0x002A020C,
-	0x0F120001, //REG_TC_GP_PrevOpenAfterChange
-	0x002A01F4,
-	0x0F120001, //REG_TC_GP_NewConfigSync
-	0x002A020A,
-	0x0F120001, //REG_TC_GP_PrevConfigChanged
-	0x002A0212,
-	0x0F120001, //REG_TC_GP_CapConfigChanged
-	0x002A01E8,
-	0x0F120000, //REG_TC_GP_EnableCapture
-	0x0F120001, //REG_TC_GP_EnableCaptureChanged
+	/* PREVIEW */
+	/* 0x002A0208, */
+	/* 0x0F120000, */ /* REG_TC_GP_ActivePrevConfig */
+	/* 0x002A0210, */
+	/* 0x0F120000, */ /* REG_TC_GP_ActiveCapConfig */
+	/* 0x002A020C, */
+	/* 0x0F120001, */ /* REG_TC_GP_PrevOpenAfterChange */
+	/* 0x002A01F4, */
+	/* 0x0F120001, */ /* REG_TC_GP_NewConfigSync */
+	/* 0x002A020A, */
+	/* 0x0F120001, */ /* REG_TC_GP_PrevConfigChanged */
+	/* 0x002A0212 ,*/
+	/* 0x0F120001, */ /* REG_TC_GP_CapConfigChanged */
+	/* 0x002A01E8, */
+	/* 0x0F120000, */ /* REG_TC_GP_EnableCapture */
+	/* 0x0F120001, */ /* REG_TC_GP_EnableCaptureChanged */
 
-	0xFFFF0064, //Delay 100ms
+	/* 0xFFFF0064, */ /* Delay 100ms */
 
 	//===================================================================
 	// AFC
@@ -13934,12 +13961,12 @@ static const u32 s5k5ccgx_1280_720_Preview[] = {
 	0x0f120800, //analog filter update Green
 
 
-	// TNP_Regs_bUseAccurateFR
-	0x00287000,
-	0x002A3FE4,
-	0x0F120001,	                  // on/off TNP_Regs_bAccuDynamicFR
-	0x0F1234A2,	                  // on/off TNP_Regs_usMinAccuDynamicFrTme
-	0x0F1240FD,	                  // on/off TNP_Regs_usMaxAccuDynamicFrTme
+	/* TNP_Regs_bUseAccurateFR */
+	/* 0x00287000, */
+	/* 0x002A3FE4, */
+	/* 0x0F120001, */ /* on/off TNP_Regs_bAccuDynamicFR */
+	/* 0x0F1234A2, */ /* on/off TNP_Regs_usMinAccuDynamicFrTme */
+	/* 0x0F1240FD, */ /* on/off TNP_Regs_usMaxAccuDynamicFrTme */
 };
 
 /* Return preview mode */
@@ -15746,15 +15773,15 @@ static const u32 s5k5ccgx_af_abort[] = {
 0x0F120001,   // REG_TC_AF_AfCmd = 1, Abort A
 };
 
-static const u32 s5k5ccgx_af_off[] = {
-0xFCFCD000,
-0x00287000,
-0x002A0224,
-0x0F120004,
-0xFFFF0043,   //67 ms delay,  Min 1 frame delay
-0x002A0226,   // write [7000 0226, REG_TC_AF_AfCmdParam]
-0x0F120000,   // write lens position from 0000 to 00FF. 0000 means infinity and 00FF means macro.
-0xFFFF0096,   // 150ms Delay
+static const u32 s5k5ccgx_af_off_reg[] = {
+	0xFCFCD000,
+	0x00287000,
+	0x002A0226,
+	0x0F120000,
+	0xFFFF0049, /* 73 ms delay,  Min 1 frame delay */
+	0x002A0224, /* write [7000 0226, REG_TC_AF_AfCmdParam] */
+	0x0F120004, /* write lens position from 0000 to 00FF. 0000 means infinity and 00FF means macro.*/
+	0xFFFF0118, /* 280ms Delay */
 };
 
 static const u32 s5k5ccgx_af_normal_on[] = {
@@ -15785,7 +15812,7 @@ static const u32 s5k5ccgx_af_night_normal_on[] = {
 	0x002A0226, /* write [7000 0226, REG_TC_AF_AfCmdParam] */
 	0x0F120000, /* write lens position from 0000 to 00FF. 0000 means infinity and 00FF means macro.*/
 
-	0xFFFF00FA, /* 150ms Delay*/
+	0xFFFF00FA, /* 250ms Delay*/
 
 	/* #af_search_usSingleAfFlags, 1040 : macro mode on,  2nd search off,
 	1042 : macro mode on, 2nd search(fine search) on

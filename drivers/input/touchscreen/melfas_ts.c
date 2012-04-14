@@ -55,13 +55,13 @@
 #define G2W_SW_BASE_VER		0x01
 
 #define GFS_HW_VER		0x03
-#define GFS_SW_VER		0x14
+#define GFS_SW_VER		0x11
 
 #define G2M_HW_VER		0x12
 #define G2M_SW_VER		0x09
 
 #define GFD_HW_VER		0x26
-#define GFD_SW_VER		0x07
+#define GFD_SW_VER		0x04
 
 #define G2W_HW_VER		0x32
 #define G2W_SW_VER		0x01
@@ -69,15 +69,12 @@
 // ISC mode ver
 #define CORE_VER			0x20
 
-#define GFS_PRIVATE_VER		0x07
-#define GFS_PUBLIC_VER		0x08
-
+#define GFS_PRIVATE_VER		0x03
+#define GFS_PUBLIC_VER		0x04
 #define G2M_PRIVATE_VER		0x00
 #define G2M_PUBLIC_VER		0x01
-
-#define GFD_PRIVATE_VER		0x04
-#define GFD_PUBLIC_VER		0x05
-
+#define GFD_PRIVATE_VER		0x00
+#define GFD_PUBLIC_VER		0x01
 #define G2W_PRIVATE_VER		0x00
 #define G2W_PUBLIC_VER		0x01
 
@@ -110,7 +107,7 @@
 
 #define I2C_RETRY_CNT			50
 #define P2_MAX_I2C_FAIL			50
-#define P2_MAX_INFO_READ_FAIL	3
+#define P2_MAX_FW_READ_FAIL		3
 
 #define	SET_DOWNLOAD_BY_GPIO	1
 
@@ -773,31 +770,25 @@ static int firmware_update(struct melfas_ts_data *ts)
 #if SET_DOWNLOAD_BY_GPIO
 
 	msleep(200);
-
-	for (i = 0 ; i < P2_MAX_INFO_READ_FAIL ; i++) {
-		ret = check_tsp_connect(ts, &tsp_connect_stat);
-		if (!ret)
-			break;
-		msleep(100);
-	}
-	if (i == P2_MAX_INFO_READ_FAIL) {
+	ret = check_tsp_connect(ts,&tsp_connect_stat);
+	if(ret){
 		pr_err("[TSP] check_tsp_connect check fail! [%d]",ret);
 		fw_isp_update |= true;
 	}
-	pr_info("[TSP] TSP panel is %sconnected [%d]",
-				tsp_connect_stat ? "" : "dis", i);
+	pr_info("[TSP] TSP panel is %sconnected ",
+				tsp_connect_stat ? "" : "dis");
 
 	if (touch_id == 3) {
 		return 0;
 	}
 
-	for (i = 0 ; i < P2_MAX_INFO_READ_FAIL ; i++) {
+	for(i=0 ; i < P2_MAX_FW_READ_FAIL ; i++){
 		ret = check_detail_firmware(ts,fw_ver);
 		if(!ret)
 			break;
 	}
 
-	if (i == P2_MAX_INFO_READ_FAIL) {
+	if(i == P2_MAX_FW_READ_FAIL){
 		pr_err("[TSP] check_firmware fail! [%d]",ret);
 		fw_isp_update |= true;
 	}else{

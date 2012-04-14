@@ -227,6 +227,7 @@ struct dsim_lcd_config {
 	void *mipi_ddi_pd;
 
 	unsigned int lcd_id;
+	unsigned int lcd_enabled;
 };
 
 struct s5p_platform_dsim {

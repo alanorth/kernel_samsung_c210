@@ -205,6 +205,10 @@ extern struct platform_device s5pv310_device_pdma0;
 extern struct platform_device s5pv310_device_pdma1;
 
 
+#ifdef CONFIG_FB_S3C_MIPI_LCD
+extern struct platform_device s5p_device_dsim;
+#endif
+
 /**
  * s3c_set_platdata() - helper for setting platform data
  * @pd: The default platform data for this device.

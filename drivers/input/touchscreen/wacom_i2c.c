@@ -301,6 +301,76 @@ fail:
 	return count;
 }
 
+static ssize_t epen_reset_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct wacom_i2c *wac_i2c = dev_get_drvdata(dev);
+	int value;
+	char mode;
+
+	if (sscanf(buf, "%d", &value) == 1) {
+		if (1 == value) {
+			pr_info("[E-PEN] %s\n", __func__);
+			disable_irq(wac_i2c->irq);
+			wac_i2c->wac_pdata->suspend_platform_hw();
+			msleep(500);
+			wac_i2c->wac_pdata->resume_platform_hw();
+			enable_irq(wac_i2c->irq);
+		} else
+			pr_info("[E-PEN] %s : wrong data\n", __func__);
+
+	} else {
+		pr_err("[E-PEN] failed to reset\n", __func__);
+		count = -1;
+	}
+fail:
+	return count;
+}
+
+static ssize_t epen_reset_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct wacom_i2c *wac_i2c = dev_get_drvdata(dev);
+
+	if (0 == wacom_i2c_test(wac_i2c))
+		return sprintf(buf, "PASS\n");
+	else
+		return sprintf(buf, "FAIL\n");
+}
+
+static ssize_t epen_checksum_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct wacom_i2c *wac_i2c = dev_get_drvdata(dev);
+	int value;
+	char mode;
+
+	if (sscanf(buf, "%d", &value) == 1) {
+		if (1 == value) {
+			/* TBD for the factory test */
+			pr_info("[E-PEN] %s\n", __func__);
+		} else
+			pr_info("[E-PEN] %s : wrong data\n", __func__);
+
+	} else {
+		pr_err("[E-PEN] failed to checksum\n", __func__);
+		count = -1;
+	}
+fail:
+	return count;
+}
+
+static ssize_t epen_checksum_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct wacom_i2c *wac_i2c = dev_get_drvdata(dev);
+
+	if (0 == wacom_i2c_test(wac_i2c))
+		return sprintf(buf, "PASS\n");
+	else
+		return sprintf(buf, "FAIL\n");
+}
+
 static DEVICE_ATTR(epen_firm_update,
 	S_IWUSR|S_IWGRP, NULL, epen_firmware_update_store);
 static DEVICE_ATTR(epen_firm_update_status,
@@ -309,12 +379,24 @@ static DEVICE_ATTR(epen_firm_version,
 	S_IRUGO, epen_firm_version_show, NULL);
 static DEVICE_ATTR(epen_sampling_rate,
 	S_IWUSR|S_IWGRP, NULL, epen_sampling_rate_store);
+static DEVICE_ATTR(epen_reset,
+	S_IWUSR|S_IWGRP, NULL, epen_reset_store);
+static DEVICE_ATTR(epen_reset_result,
+	S_IRUGO, epen_reset_show, NULL);
+static DEVICE_ATTR(epen_checksum,
+	S_IWUSR|S_IWGRP, NULL, epen_checksum_store);
+static DEVICE_ATTR(epen_checksum_result,
+	S_IRUGO, epen_checksum_show, NULL);
 
 static struct attribute *epen_attributes[] = {
 	&dev_attr_epen_firm_update.attr,
 	&dev_attr_epen_firm_update_status.attr,
 	&dev_attr_epen_firm_version.attr,
 	&dev_attr_epen_sampling_rate.attr,
+	&dev_attr_epen_reset.attr,
+	&dev_attr_epen_reset_result.attr,
+	&dev_attr_epen_checksum.attr,
+	&dev_attr_epen_checksum_result.attr,
 	NULL,
 };
 

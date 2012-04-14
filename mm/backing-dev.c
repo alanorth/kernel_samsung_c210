@@ -695,7 +695,7 @@ void bdi_destroy(struct backing_dev_info *bdi)
 	 * If bdi_unregister() had already been called earlier, the
 	 * wakeup_timer could still be armed because bdi_prune_sb()
 	 * can race with the bdi_wakeup_thread_delayed() calls from
-	 * __mark_inode_dirty().
+	 * __mark_inode_dirty().	 
 	 */
 	del_timer_sync(&bdi->wb.wakeup_timer);
 

@@ -1,7 +1,7 @@
-
+#
 # Kernel makefile for motions sensors
 #
-# 
+#
 
 # MPU
 obj-$(CONFIG_MPU_SENSORS_MPU3050)	+= mpu3050.o
@@ -66,6 +66,11 @@ ifdef CONFIG_MPU_SENSORS_MMA845X
 mpu3050-objs += $(MLLITE_DIR)accel/mma845x.o
 endif
 
+ifdef CONFIG_MPU_SENSORS_KXTF9_LIS3DH
+mpu3050-objs += $(MLLITE_DIR)accel/kxtf9.o
+mpu3050-objs += $(MLLITE_DIR)accel/lis3dh.o
+endif
+
 #
 # Compass options
 #
@@ -112,7 +117,7 @@ ifdef CONFIG_MPU_SENSORS_BMA085
 mpu3050-objs += $(MLLITE_DIR)pressure/bma085.o
 endif
 
-EXTRA_CFLAGS += -I$(M)/$(MLLITE_DIR) \
+ccflags-y += -I$(M)/$(MLLITE_DIR) \
                 -I$(M)/../../include \
 		-Idrivers/misc/mpu3050 \
                 -Iinclude/linux
@@ -128,13 +133,13 @@ mpu6000-objs += mpuirq.o \
 	$(MLLITE_DIR)accel/mantis.o
 
 ifdef CONFIG_MPU_SENSORS_MPU6000
-EXTRA_CFLAGS += -DM_HW
+ccflags-y += -DM_HW
 endif
 
 obj-$(CONFIG_SENSORS_CORE)			+= sensors_core.o
 obj-$(CONFIG_MPU_SENSORS_TIMERIRQ)+= timerirq.o
 
 ifdef CONFIG_MPU_SENSORS_DEBUG
-EXTRA_CFLAGS += -DDEBUG 
+ccflags-y += -DDEBUG
 endif
 

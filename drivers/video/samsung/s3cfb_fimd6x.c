@@ -259,6 +259,26 @@ int s3cfb_set_display_mode(struct s3cfb_global *ctrl)
 	return 0;
 }
 
+
+int s3cfb_register_read(struct s3cfb_global *ctrl)
+{
+	int i;
+
+	for (i = 0; i < 0xd0;) {
+		printk(KERN_DEBUG "FIMD %x=0x%x\n", i, readl(ctrl->regs + i));
+		i = i + 4;
+	}
+
+	return 0;
+}
+
+int s3cfb_register_write(struct s3cfb_global *ctrl, int address, int value)
+{
+	writel(value, ctrl->regs + address);
+
+	return 0;
+}
+
 int s3cfb_display_on(struct s3cfb_global *ctrl)
 {
 	u32 cfg;
@@ -301,7 +321,7 @@ int s3cfb_display_off(struct s3cfb_global *ctrl)
 
 	do {
 		if (++fimd_count > 2000000) {
-			printk("FIMD off fail\n");
+			printk(KERN_ERR "FIMD off fail\n");
 			return 1;
 		}
 		if (!(readl(ctrl->regs + S3C_VIDCON0) & 0x1))

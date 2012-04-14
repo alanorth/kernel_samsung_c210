@@ -1172,6 +1172,13 @@ cascade:
 		index = slot = timer_jiffies & TVN_MASK;
 		do {
 			list_for_each_entry(nte, varp->vec + slot, entry) {
+#if defined(CONFIG_MACH_P8LTE_REV00) || defined(CONFIG_MACH_P8_REV00) || defined(CONFIG_MACH_P8_REV01)
+				if (!nte) {
+					printk(KERN_ERR "BUG: nte is NULL.\n");
+					WARN_ON(1);
+					break;
+				}
+#endif
 				if (tbase_get_deferrable(nte->base))
 					continue;
 

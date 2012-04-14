@@ -110,7 +110,7 @@ struct mpuirq_data {
 	int data_size;
 	void *data;
 #ifdef FEATURE_GYRO_SELFTEST_INTERRUPT
-        unsigned long long mpuirq_jiffies;
+	unsigned long long mpuirq_jiffies;
 #endif
 };
 enum ext_slave_config_key {
@@ -170,7 +170,7 @@ enum ext_slave_id {
 	ACCEL_ID_MMA8450,
 	ACCEL_ID_MMA845X,
 	ACCEL_ID_MPU6000,
-    ACCEL_ID_LIS3DH,
+	ACCEL_ID_LIS3DH,
 
 	COMPASS_ID_AKM,
 	COMPASS_ID_AMI30X,
@@ -178,7 +178,7 @@ enum ext_slave_id {
 	COMPASS_ID_HMC5883,
 	COMPASS_ID_LSM303,
 	COMPASS_ID_MMC314X,
-	COMPASS_ID_MMC328X, //MEMSIC328X	
+	COMPASS_ID_MMC328X,
 	COMPASS_ID_HSCDTD002B,
 	COMPASS_ID_HSCDTD004A,
 
@@ -314,7 +314,7 @@ struct mpu3050_platform_data {
 	struct ext_slave_platform_data accel;
 	struct ext_slave_platform_data compass;
 	struct ext_slave_platform_data pressure;
-	struct class *sec_class;	
+	struct class *sec_class;
 };
 
 
@@ -388,9 +388,16 @@ struct ext_slave_descr *lsm303dlha_get_slave_descr(void);
 #define get_accel_slave_descr lsm303dlha_get_slave_descr
 #endif
 
+#ifdef CONFIG_MPU_SENSORS_KXTF9_LIS3DH	/* Kionix accelerometer */
+struct ext_slave_descr *kxtf9_get_slave_descr(void);
+struct ext_slave_descr *lis3dh_get_slave_descr(void);
+#undef get_accel_slave_descr
+#define get_accel_slave_descr kxtf9_get_slave_descr
+#endif
+
 /* MPU6000 Accel */
 #if defined(CONFIG_MPU_SENSORS_MPU6000) || \
-    defined(CONFIG_MPU_SENSORS_MPU6000_MODULE)
+defined(CONFIG_MPU_SENSORS_MPU6000_MODULE)
 struct ext_slave_descr *mantis_get_slave_descr(void);
 #undef get_accel_slave_descr
 #define get_accel_slave_descr mantis_get_slave_descr

@@ -24,10 +24,13 @@
 #include <linux/slab.h>
 #include <linux/bh1721fvc.h>
 
-#define FACTORY_TEST
+#define SENSOR_AL3201_ADDR		0x1c
+#define SENSOR_BH1721FVC_ADDR	0x23
 
 #define BH1721FVC_DRV_NAME	"bh1721fvc"
-#define DRIVER_VERSION		"1.0"
+#define DRIVER_VERSION		"1.1"
+
+#define LIMIT_RESET_COUNT	5
 
 #define LUX_MIN_VALUE		0
 #define LUX_MAX_VALUE		65528
@@ -61,17 +64,14 @@ struct bh1721fvc_data {
 	struct hrtimer timer;
 	struct mutex lock;
 	struct workqueue_struct *wq;
+	struct class *factory_class;
+	struct device *factory_dev;
 	ktime_t light_poll_delay;
 	enum BH1721FVC_STATE state;
 	u8 measure_mode;
 	bool als_buf_initialized;
 	int als_value_buf[ALS_BUFFER_NUM];
 	int als_index_count;
-	
-#ifdef FACTORY_TEST
-	struct class *factory_class;
-	struct device *factory_dev;
-#endif
 };
 
 static int bh1721fvc_get_luxvalue(struct bh1721fvc_data *bh1721fvc, u16 *value);
@@ -80,7 +80,7 @@ static int bh1721fvc_write_byte(struct i2c_client *client, u8 value)
 {
 	int retry;
 
-	for (retry = 0; retry < 10; retry++)
+	for (retry = 0; retry < 5; retry++)
 		if (!i2c_smbus_write_byte(client, value))
 			return 0;
 
@@ -306,15 +306,14 @@ static struct attribute_group bh1721fvc_attribute_group = {
 	.attrs = bh1721fvc_sysfs_attrs,
 };
 
-#ifdef FACTORY_TEST
 static ssize_t factory_file_illuminance_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
-	struct bh1721fvc_data *bh1721fvc = dev_get_drvdata(dev);
-	unsigned int result;
-	int retry;
 	u16 lux;
+	int retry;
 	int err;
+	unsigned int result;
+	struct bh1721fvc_data *bh1721fvc = dev_get_drvdata(dev);
 
 	if (bh1721fvc->state == POWER_DOWN) {
 		err = bh1721fvc_write_byte(bh1721fvc->client,
@@ -326,15 +325,14 @@ static ssize_t factory_file_illuminance_show(struct device *dev,
 					commands[AUTO_MEASURE]);
 		if (err)
 			goto err_exit;
-	
 		msleep(210);
 	}
 
 	for (retry = 0; retry < 10; retry++) {
-		if  (i2c_master_recv( bh1721fvc->client, (u8 *)&lux, 2) == 2) {
+		if (i2c_master_recv(bh1721fvc->client, (u8 *)&lux, 2) == 2) {
 			be16_to_cpus(&lux);
 			break;
-		}			
+		}
 	}
 
 	if (retry == 10) {
@@ -345,7 +343,7 @@ static ssize_t factory_file_illuminance_show(struct device *dev,
 	result = (lux * 10) / 12;
 	result = result * 139 / 13;
 
-	if(bh1721fvc->state == POWER_DOWN)
+	if (bh1721fvc->state == POWER_DOWN)
 		bh1721fvc_write_byte(bh1721fvc->client, commands[POWER_DOWN]);
 
 	return sprintf(buf, "%u\n", result);
@@ -361,7 +359,15 @@ static DEVICE_ATTR(lightsensor_file_cmd, S_IRUGO | S_IWUSR | S_IWGRP,
 
 static DEVICE_ATTR(lightsensor_file_illuminance, S_IRUGO,
 		factory_file_illuminance_show, NULL);
-#endif
+
+static ssize_t sensor_info_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%d\n", SENSOR_BH1721FVC_ADDR);
+}
+
+static DEVICE_ATTR(sensor_info, S_IRUGO, sensor_info_show, NULL);
+
 
 static int bh1721fvc_get_luxvalue(struct bh1721fvc_data *bh1721fvc, u16 *value)
 {
@@ -372,19 +378,19 @@ static int bh1721fvc_get_luxvalue(struct bh1721fvc_data *bh1721fvc, u16 *value)
 	unsigned int als_index = 0;
 	unsigned int als_max = 0;
 	unsigned int als_min = 0;
-	
+
 	for (retry = 0; retry < 10; retry++) {
-		if  (i2c_master_recv( bh1721fvc->client, (u8 *)value, 2) == 2) {
+		if  (i2c_master_recv(bh1721fvc->client, (u8 *)value, 2) == 2) {
 			be16_to_cpus(value);
 			break;
-		}			
+		}
 	}
-	
+
 	if (retry == 10) {
 		pr_err("%s : I2C read failed.. retry %d\n", __func__, retry);
 		return -EIO;
 	}
-		
+
 	als_index = (bh1721fvc->als_index_count++) % ALS_BUFFER_NUM;
 
 	/*ALS buffer initialize (light sensor off ---> light sensor on) */
@@ -411,7 +417,7 @@ static int bh1721fvc_get_luxvalue(struct bh1721fvc_data *bh1721fvc, u16 *value)
 
 	if (bh1721fvc->als_index_count >= ALS_BUFFER_NUM)
 		bh1721fvc->als_index_count = 0;
-	
+
 	return 0;
 }
 
@@ -448,6 +454,52 @@ static enum hrtimer_restart bh1721fvc_timer_func(struct hrtimer *timer)
 	return HRTIMER_RESTART;
 }
 
+int bh1721fvc_test_luxvalue(struct bh1721fvc_data *bh1721fvc)
+{
+	unsigned int result;
+	int retry;
+	u16 lux;
+	int err;
+
+	if (bh1721fvc->state == POWER_DOWN) {
+		err = bh1721fvc_write_byte(bh1721fvc->client,
+			commands[POWER_ON]);
+		if (err)
+			return err;
+
+		err = bh1721fvc_write_byte(bh1721fvc->client,
+			commands[AUTO_MEASURE]);
+		if (err)
+			goto err_exit;
+
+		msleep(210);
+	}
+
+	for (retry = 0; retry < 5; retry++) {
+		if (i2c_master_recv(bh1721fvc->client, (u8 *)&lux, 2) == 2) {
+			be16_to_cpus(&lux);
+			break;
+		}
+	}
+
+	if (retry == 5) {
+		printk(KERN_ERR"I2C read failed.. retry %d\n", retry);
+		goto err_exit;
+	}
+
+	result = (lux * 10) / 12;
+	result = result * 139 / 13;
+
+	if (bh1721fvc->state == POWER_DOWN)
+		bh1721fvc_write_byte(bh1721fvc->client, commands[POWER_DOWN]);
+
+	return (int)result;
+
+err_exit:
+	bh1721fvc_write_byte(bh1721fvc->client, commands[POWER_DOWN]);
+	return err;
+}
+
 static int __devinit bh1721fvc_probe(struct i2c_client *client,
 				    const struct i2c_device_id *id)
 {
@@ -466,29 +518,38 @@ static int __devinit bh1721fvc_probe(struct i2c_client *client,
 			__func__);
 		return -ENOMEM;
 	}
-	
+
 	bh1721fvc->reset = pdata->reset;
 	if (!bh1721fvc->reset) {
 		pr_err("%s: reset callback is null\n", __func__);
 		err = -EIO;
 		goto err_reset_null;
 	}
-	
+
 	err = bh1721fvc->reset();
 	if (err) {
 		pr_err("%s: Failed to reset\n", __func__);
 		goto err_reset_failed;
 	}
-	
+
 	bh1721fvc->client = client;
 	i2c_set_clientdata(client, bh1721fvc);
 
 	mutex_init(&bh1721fvc->lock);
+	bh1721fvc->state = POWER_DOWN;
+	bh1721fvc->measure_mode = AUTO_MEASURE;
+
+	err = bh1721fvc_test_luxvalue(bh1721fvc);
+	if (err < 0) {
+		pr_err("%s: No search bh1721fvc lightsensor!\n", __func__);
+		goto err_test_lightsensor;
+	} else {
+		printk(KERN_ERR"Lux : %d\n", err);
+	}
+
 	hrtimer_init(&bh1721fvc->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 
 	bh1721fvc->light_poll_delay = ns_to_ktime(200 * NSEC_PER_MSEC);
-	bh1721fvc->state = POWER_DOWN;
-	bh1721fvc->measure_mode = AUTO_MEASURE;
 	bh1721fvc->timer.function = bh1721fvc_timer_func;
 
 	bh1721fvc->wq = alloc_workqueue("bh1721fvc_wq",
@@ -527,7 +588,6 @@ static int __devinit bh1721fvc_probe(struct i2c_client *client,
 		goto err_sysfs_create_group_light;
 	}
 
-#ifdef FACTORY_TEST
 	bh1721fvc->factory_class = class_create(THIS_MODULE, "lightsensor");
 
 	if (IS_ERR(bh1721fvc->factory_class)) {
@@ -562,11 +622,23 @@ static int __devinit bh1721fvc_probe(struct i2c_client *client,
 			dev_attr_lightsensor_file_illuminance.attr.name);
 		goto err_illuminance_attr_create;
 	}
-#endif
+
+	err = device_create_file(bh1721fvc->factory_dev,
+			&dev_attr_sensor_info);
+	if (err < 0) {
+		pr_err("Failed to create device file(%s)!\n",
+			dev_attr_sensor_info.attr.name);
+		goto err_sensor_info_attr_create;
+	}
+
+	printk(KERN_INFO"%s: success!\n", __func__);
+
 
 	goto done;
 
-#ifdef FACTORY_TEST
+err_sensor_info_attr_create:
+	device_remove_file(bh1721fvc->factory_dev,
+			&dev_attr_lightsensor_file_illuminance);
 err_illuminance_attr_create:
 	device_remove_file(bh1721fvc->factory_dev,
 			&dev_attr_lightsensor_file_cmd);
@@ -577,13 +649,13 @@ err_factory_device_create:
 err_factory_sysfs_create:
 	sysfs_remove_group(&bh1721fvc->input_dev->dev.kobj,
 				&bh1721fvc_attribute_group);
-#endif
 err_sysfs_create_group_light:
 	input_unregister_device(bh1721fvc->input_dev);
 err_input_register_device_light:
 err_input_allocate_device_light:
 	destroy_workqueue(bh1721fvc->wq);
 err_create_workqueue:
+err_test_lightsensor:
 	mutex_destroy(&bh1721fvc->lock);
 err_reset_failed:
 err_reset_null:
@@ -596,16 +668,14 @@ static int  bh1721fvc_remove(struct i2c_client *client)
 {
 	struct bh1721fvc_data *bh1721fvc = i2c_get_clientdata(client);
 
-	bh1721fvc_dbmsg("bh1721fvc_remove +\n");
-
-#ifdef FACTORY_TEST
+	device_remove_file(bh1721fvc->factory_dev,
+			&dev_attr_sensor_info);
 	device_remove_file(bh1721fvc->factory_dev,
 			&dev_attr_lightsensor_file_cmd);
 	device_remove_file(bh1721fvc->factory_dev,
 			&dev_attr_lightsensor_file_illuminance);
 	device_destroy(bh1721fvc->factory_class, 0);
 	class_destroy(bh1721fvc->factory_class);
-#endif
 
 	sysfs_remove_group(&bh1721fvc->input_dev->dev.kobj,
 				&bh1721fvc_attribute_group);

@@ -175,7 +175,11 @@ static void usb_apply_path(enum usb_path_t path)
 
 	/* default */
 	gpio_set_value(GPIO_USB_SEL1, 1);
+#ifdef CONFIG_MACH_P8LTE_REV00
+	gpio_set_value(GPIO_USB_SEL2, 1);
+#else
 	gpio_set_value(GPIO_USB_SEL2, 0);
+#endif
 	gpio_set_value(GPIO_USB_SEL3, 1);
 
 out_ap:

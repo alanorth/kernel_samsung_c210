@@ -422,6 +422,9 @@ int s3c_vbus_enable(struct usb_gadget *gadget, int enable)
 			stop_activity(dev, dev->driver);
 			spin_unlock_irqrestore(&dev->lock, flags);
 			udc_disable(dev);
+	/* usb device wake unlock issue : usb device wake unlock */
+			wake_lock_timeout(&dev->usbd_wake_lock,
+					S3C_UDC_WAKE_UNLOCK_DELAY_100);
 		} else {
 			udc_reinit(dev);
 			udc_enable(dev);

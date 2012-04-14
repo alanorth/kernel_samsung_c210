@@ -32,6 +32,7 @@
 
 #define SMART_DIMMING
 
+#include "s3cfb.h"
 #include "s5p-dsim.h"
 #ifndef SMART_DIMMING
 #include "s6e8ab0_gamma_m3.h"
@@ -45,34 +46,40 @@
 
 #define MIN_BRIGHTNESS	0
 #define MAX_BRIGHTNESS	255
-#define DEFAULT_GAMMA_LEVEL	13
 #define DEFAULT_BRIGHTNESS	150
+#define DEFAULT_GAMMA_LEVEL	13
 
 #define POWER_IS_ON(pwr)	((pwr) <= FB_BLANK_NORMAL)
 
-#ifdef SMART_DIMMING
-#define LDI_MTP_LENGTH	24
-#define LDI_MTP_ADDR		0xd3
-#define PANEL_ID_COMMAND	0xD1
-#endif
+#define LDI_ID_REG		0xD1
+#define LDI_ID_LEN		3
 
+#ifdef SMART_DIMMING
+#define LDI_MTP_LENGTH		24
+#define LDI_MTP_ADDR			0xD3
 
 #define ELVSS_OFFSET_MAX		0x00
 #define ELVSS_OFFSET_2		0x04
 #define ELVSS_OFFSET_1		0x08
 #define ELVSS_OFFSET_MIN		0x0C
 
-#define DYNAMIC_ELVSS_MIN_VALUE	0x81
-#define DYNAMIC_ELVSS_MAX_VALUE	0xA9
+#define DYNAMIC_ELVSS_MIN_VALUE		0x81
+#define DYNAMIC_ELVSS_MAX_VALUE_MODE0	0xA1
+#define DYNAMIC_ELVSS_MAX_VALUE_MODE1	0xA9
 
-#define ELVSS_MODE0_MIN_VOLTAGE	64
-#define ELVSS_MODE1_MIN_VOLTAGE	64
+#define ELVSS_MODE0_MIN_VOLTAGE		64
+#define ELVSS_MODE1_MIN_VOLTAGE		64
 
 struct str_elvss {
 	u8 reference;
 	u8 limit;
 };
+#endif
 
+
+#define DEFAULT_DDI_REG_DATA_SIZE	10
+#define DDI_TEMP_FAILED		-1
+#define DDI_READ_FAILED		-2
 
 struct lcd_info {
 	unsigned int			bl;
@@ -94,26 +101,14 @@ struct lcd_info {
 
 	const unsigned char		**gamma_table;
 
-	unsigned int			support_elvss;
-	struct str_elvss		elvss;
-
 #ifdef SMART_DIMMING
+	unsigned int			support_elvss;
 	struct str_smart_dim		smart;
+	struct str_elvss		elvss;
 	struct mutex			bl_lock;
 #endif
 	unsigned int			connected;
 };
-
-#ifdef SMART_DIMMING
-static int s6e8ax0_adb_brightness_update(struct lcd_info *lcd, u32 br, u32 force);
-static int s6e8aa0_update_brightness(struct lcd_info *lcd, u32 brightness);
-#endif
-
-
-#define RD_CNT      3
-int s6e8aa0_update_elvss(struct lcd_info *lcd, u32 brightness);
-static char g_idbuf[RD_CNT];
-
 
 static struct mipi_ddi_platform_data *ddi_pd;
 
@@ -142,8 +137,7 @@ static int s6e8ax0_write(struct lcd_info *lcd, const unsigned char *seq, int len
 	return 0;
 }
 
-
-static int s6e8ax0_read(struct lcd_info *lcd, const u8 addr, u16 count, u8 *buf)
+static int _s6e8ax0_read(struct lcd_info *lcd, const u8 addr, u16 count, u8 *buf)
 {
 	int ret = 0;
 
@@ -160,7 +154,6 @@ static int s6e8ax0_read(struct lcd_info *lcd, const u8 addr, u16 count, u8 *buf)
 	return ret;
 }
 
-
 static int s6e8ax0_set_link(void *pd, unsigned int dsim_base,
 	unsigned char (*cmd_write) (unsigned int dsim_base, unsigned int data0,
 	    unsigned int data1, unsigned int data2),
@@ -171,7 +164,7 @@ static int s6e8ax0_set_link(void *pd, unsigned int dsim_base,
 	temp_pd = (struct mipi_ddi_platform_data *) pd;
 	if (temp_pd == NULL) {
 		printk(KERN_ERR "mipi_ddi_platform_data is null.\n");
-		return -1;
+		return -EPERM;
 	}
 
 	ddi_pd = temp_pd;
@@ -191,273 +184,22 @@ static int s6e8ax0_set_link(void *pd, unsigned int dsim_base,
 	return 0;
 }
 
-#ifndef SMART_DIMMING
-static int s6e8ax0_gamma_ctl(struct lcd_info *lcd)
-{
-	/* Gamma Select */
-	s6e8ax0_write(lcd, SEQ_GAMMA_SELECT, ARRAY_SIZE(SEQ_GAMMA_SELECT));
-
-	s6e8ax0_write(lcd, lcd->gamma_table[lcd->bl], GAMMA_PARAM_SIZE);
-
-	/* Gamma Set Update */
-	s6e8ax0_write(lcd, SEQ_GAMMA_UPDATE, ARRAY_SIZE(SEQ_GAMMA_UPDATE));
-
-	lcd->current_bl = lcd->bl;
-
-	return 0;
-}
-#endif
-
-static int s6e8ax0_set_elvss(struct lcd_info *lcd)
+static int s6e8ax0_read(struct lcd_info *lcd, const u8 addr, u16 count, u8 *buf, u8 retry_cnt)
 {
 	int ret = 0;
 
-	switch (lcd->bl) {
-	case 0 ... 7: /* 30cd ~ 100cd */
-		ret = s6e8ax0_write(lcd, ELVSS_TABLE[0], ELVSS_PARAM_SIZE);
-		break;
-	case 8 ... 13: /* 105cd ~ 150cd */
-		ret = s6e8ax0_write(lcd, ELVSS_TABLE[1], ELVSS_PARAM_SIZE);
-		break;
-	case 14 ... 18: /* 160cd ~ 200cd */
-		ret = s6e8ax0_write(lcd, ELVSS_TABLE[2], ELVSS_PARAM_SIZE);
-		break;
-	case 19 ... 24: /* 205cd ~ 250cd */
-		ret = s6e8ax0_write(lcd, ELVSS_TABLE[3], ELVSS_PARAM_SIZE);
-		break;
-	default:
-		break;
+read_retry:
+	ret = _s6e8ax0_read(lcd, addr, count, buf);
+	if (!ret) {
+		if (retry_cnt) {
+			printk(KERN_WARNING "[WARN:LCD] %s : retry cnt : %d\n", __func__, retry_cnt);
+			retry_cnt--;
+			goto read_retry;
+		} else
+			printk(KERN_ERR "[ERROR:LCD] %s : 0x%02x read failed\n", __func__, addr);
 	}
 
-	dev_dbg(&lcd->ld->dev, "level  = %d\n", lcd->bl);
-
-	if (ret) {
-		ret = -EPERM;
-		goto elvss_err;
-	}
-
-elvss_err:
 	return ret;
-}
-
-static int s6e8ax0_set_acl(struct lcd_info *lcd)
-{
-	int ret = 0;
-
-	if (lcd->acl_enable) {
-		if (lcd->cur_acl == 0) {
-			if (lcd->bl == 0 || lcd->bl == 1) {
-				s6e8ax0_write(lcd, SEQ_ACL_OFF, ARRAY_SIZE(SEQ_ACL_OFF));
-				dev_dbg(lcd->dev, "ACL_cutoff_set Percentage : off!!\n");
-			} else
-				s6e8ax0_write(lcd, SEQ_ACL_ON, ARRAY_SIZE(SEQ_ACL_ON));
-		}
-		switch (lcd->bl) {
-		case 0 ... 1: /* 30cd ~ 40cd */
-			if (lcd->cur_acl != 0) {
-				s6e8ax0_write(lcd, SEQ_ACL_OFF, ARRAY_SIZE(SEQ_ACL_OFF));
-				dev_dbg(&lcd->ld->dev, "ACL_cutoff_set Percentage : off!!\n");
-				lcd->cur_acl = 0;
-			}
-			break;
-		default:
-			if (lcd->cur_acl != 40) {
-				s6e8ax0_write(lcd, ACL_CUTOFF_TABLE[1], ACL_PARAM_SIZE);
-				dev_dbg(&lcd->ld->dev, "ACL_cutoff_set Percentage : 50!!\n");
-				lcd->cur_acl = 40;
-			}
-			break;
-		}
-	} else {
-		s6e8ax0_write(lcd, SEQ_ACL_OFF, ARRAY_SIZE(SEQ_ACL_OFF));
-		lcd->cur_acl = 0;
-		dev_dbg(&lcd->ld->dev, "ACL_cutoff_set Percentage : off!!\n");
-	}
-
-	if (ret) {
-		ret = -EPERM;
-		goto acl_err;
-	}
-
-acl_err:
-	return ret;
-}
-
-#ifndef SMART_DIMMING
-static int update_brightness(struct lcd_info *lcd)
-{
-	int ret;
-
-	ret = s6e8ax0_gamma_ctl(lcd);
-
-	if (ret)
-		return -EPERM;
-
-	if (lcd->support_elvss)
-		ret = s6e8aa0_update_elvss(lcd, lcd->bl);
-	else
-		ret = s6e8ax0_set_elvss(lcd);
-
-	if (ret)
-		return -EPERM;
-
-	ret = s6e8ax0_set_acl(lcd);
-	if (ret)
-		return -EPERM;
-
-	return 0;
-}
-#endif
-
-static int s6e8ax0_ldi_enable(struct lcd_info *lcd)
-{
-	int ret = 0;
-
-	s6e8ax0_write(lcd, SEQ_DISPLAY_ON, ARRAY_SIZE(SEQ_DISPLAY_ON));
-
-	return ret;
-}
-
-
-static int s6e8ax0_ldi_init(struct lcd_info *lcd)
-{
-	int ret = 0;
-
-	SEQ_VREGOUT_SET[1] = g_idbuf[0];
-	SEQ_VREGOUT_SET[2] = g_idbuf[1];
-	SEQ_VREGOUT_SET[3] = g_idbuf[2];
-
-	s6e8ax0_write(lcd, SEQ_APPLY_LEVEL_2_KEY, ARRAY_SIZE(SEQ_APPLY_LEVEL_2_KEY));
-	s6e8ax0_write(lcd, SEQ_SLEEP_OUT, ARRAY_SIZE(SEQ_SLEEP_OUT));
-	msleep(20);
-	s6e8ax0_write(lcd, SEQ_APPLY_MTP_KEY, ARRAY_SIZE(SEQ_APPLY_MTP_KEY));
-	s6e8ax0_write(lcd, SEQ_PANEL_CONDITION_SET, ARRAY_SIZE(SEQ_PANEL_CONDITION_SET));
-	s6e8ax0_write(lcd, SEQ_DISPLAY_CONDITION_SET, ARRAY_SIZE(SEQ_DISPLAY_CONDITION_SET));
-#ifdef SMART_DIMMING
-	s6e8aa0_update_brightness(lcd, 30);
-#else
-	s6e8ax0_write(lcd, SEQ_GAMMA_SELECT, ARRAY_SIZE(SEQ_GAMMA_SELECT));
-	s6e8ax0_write(lcd, lcd->gamma_table[DEFAULT_GAMMA_LEVEL], GAMMA_PARAM_SIZE);
-	s6e8ax0_write(lcd, SEQ_GAMMA_UPDATE, ARRAY_SIZE(SEQ_GAMMA_UPDATE));
-#endif
-
-	s6e8ax0_write(lcd, SEQ_ETC_PWRCTL, ARRAY_SIZE(SEQ_ETC_PWRCTL));
-	s6e8ax0_write(lcd, SEQ_ETC_SOURCE_CONTROL, ARRAY_SIZE(SEQ_ETC_SOURCE_CONTROL));
-
-	s6e8ax0_write(lcd, SEQ_ELVSS_DEFAULT, ARRAY_SIZE(SEQ_ELVSS_DEFAULT));
-	s6e8ax0_write(lcd, SEQ_ETC_NVM_SETTING, ARRAY_SIZE(SEQ_ETC_NVM_SETTING));
-
-	if (lcd->support_elvss) {
-		s6e8aa0_update_elvss(lcd, DEFAULT_BRIGHTNESS);
-	} else {
-		s6e8ax0_write(lcd, SEQ_ELVSS_ON, ARRAY_SIZE(SEQ_ELVSS_ON));
-		s6e8ax0_write(lcd, SEQ_ELVSS_40, ARRAY_SIZE(SEQ_ELVSS_40));
-	}
-
-	s6e8ax0_write(lcd, SEQ_ACL_CUTOFF_40, ACL_PARAM_SIZE);
-
-	s6e8ax0_write(lcd, SEQ_VREGOUT_SET, ARRAY_SIZE(SEQ_VREGOUT_SET));
-
-	return ret;
-
-}
-
-
-
-static int s6e8ax0_ldi_disable(struct lcd_info *lcd)
-{
-	int ret = 0;
-
-	s6e8ax0_write(lcd, SEQ_DISPLAY_OFF, ARRAY_SIZE(SEQ_DISPLAY_OFF));
-	s6e8ax0_write(lcd, SEQ_STANDBY_ON, ARRAY_SIZE(SEQ_STANDBY_ON));
-
-	return ret;
-}
-
-static int s6e8ax0_power_on(struct lcd_info *lcd)
-{
-	int ret = 0;
-	struct lcd_platform_data *pd = NULL;
-	pd = lcd->lcd_pd;
-
-	dev_info(&lcd->ld->dev, "%s\n", __func__);
-
-	ret = s6e8ax0_ldi_init(lcd);
-
-	if (ret) {
-		dev_err(&lcd->ld->dev, "failed to initialize ldi.\n");
-		goto err;
-	}
-
-	mdelay(120);
-
-	ret = s6e8ax0_ldi_enable(lcd);
-	if (ret) {
-		dev_err(&lcd->ld->dev, "failed to enable ldi.\n");
-		goto err;
-	}
-
-#ifdef SMART_DIMMING
-	lcd->ldi_enable = 1;
-
-	s6e8ax0_adb_brightness_update(lcd, lcd->bd->props.brightness, 1);
-#else
-	update_brightness(lcd);
-
-	lcd->ldi_enable = 1;
-#endif
-err:
-	return ret;
-}
-
-static int s6e8ax0_power_off(struct lcd_info *lcd)
-{
-	int ret = 0;
-
-	dev_info(&lcd->ld->dev, "%s\n", __func__);
-
-	lcd->ldi_enable = 0;
-
-	ret = s6e8ax0_ldi_disable(lcd);
-
-	mdelay(120);
-
-	return ret;
-}
-
-static int s6e8ax0_power(struct lcd_info *lcd, int power)
-{
-	int ret = 0;
-
-	if (POWER_IS_ON(power) && !POWER_IS_ON(lcd->power))
-		ret = s6e8ax0_power_on(lcd);
-	else if (!POWER_IS_ON(power) && POWER_IS_ON(lcd->power))
-		ret = s6e8ax0_power_off(lcd);
-
-	if (!ret)
-		lcd->power = power;
-
-	return ret;
-}
-
-static int s6e8ax0_set_power(struct lcd_device *ld, int power)
-{
-	struct lcd_info *lcd = lcd_get_data(ld);
-
-	if (power != FB_BLANK_UNBLANK && power != FB_BLANK_POWERDOWN &&
-		power != FB_BLANK_NORMAL) {
-		dev_err(&lcd->ld->dev, "power value should be 0, 1 or 4.\n");
-		return -EINVAL;
-	}
-
-	return s6e8ax0_power(lcd, power);
-}
-
-static int s6e8ax0_get_power(struct lcd_device *ld)
-{
-	struct lcd_info *lcd = lcd_get_data(ld);
-
-	return lcd->power;
 }
 
 static int get_backlight_level_from_brightness(int brightness)
@@ -553,40 +295,128 @@ static int get_backlight_level_from_brightness(int brightness)
 	return backlightlevel;
 }
 
-#ifdef SMART_DIMMING
-static int s6e8aa0_update_brightness(struct lcd_info *lcd, u32 brightness)
+static int s6e8ax0_set_elvss(struct lcd_info *lcd)
 {
 	int ret = 0;
-	u8 gamma_regs[GAMMA_PARAM_SIZE] = {0,};
-	u32 gamma;
-#if 0
-	int i;
+
+	switch (lcd->bl) {
+	case 0 ... 7: /* 30cd ~ 100cd */
+		ret = s6e8ax0_write(lcd, ELVSS_TABLE[0], ELVSS_PARAM_SIZE);
+		break;
+	case 8 ... 13: /* 105cd ~ 150cd */
+		ret = s6e8ax0_write(lcd, ELVSS_TABLE[1], ELVSS_PARAM_SIZE);
+		break;
+	case 14 ... 18: /* 160cd ~ 200cd */
+		ret = s6e8ax0_write(lcd, ELVSS_TABLE[2], ELVSS_PARAM_SIZE);
+		break;
+	case 19 ... 24: /* 205cd ~ 250cd */
+		ret = s6e8ax0_write(lcd, ELVSS_TABLE[3], ELVSS_PARAM_SIZE);
+		break;
+	default:
+		break;
+	}
+
+	dev_dbg(&lcd->ld->dev, "level  = %d\n", lcd->bl);
+
+	if (ret) {
+		ret = -EPERM;
+		goto elvss_err;
+	}
+
+elvss_err:
+	return ret;
+}
+
+static int s6e8ax0_set_acl(struct lcd_info *lcd)
+{
+	int ret = 0;
+
+	if (lcd->acl_enable) {
+		if (lcd->cur_acl == 0) {
+			if (lcd->bl == 0 || lcd->bl == 1) {
+				s6e8ax0_write(lcd, SEQ_ACL_OFF, ARRAY_SIZE(SEQ_ACL_OFF));
+				dev_dbg(&lcd->ld->dev, "%s : cur_acl=%d\n", __func__, lcd->cur_acl);
+			} else
+				s6e8ax0_write(lcd, SEQ_ACL_ON, ARRAY_SIZE(SEQ_ACL_ON));
+		}
+		switch (lcd->bl) {
+		case 0 ... 1: /* 30cd ~ 40cd */
+			if (lcd->cur_acl != 0) {
+				s6e8ax0_write(lcd, SEQ_ACL_OFF, ARRAY_SIZE(SEQ_ACL_OFF));
+				lcd->cur_acl = 0;
+				dev_dbg(&lcd->ld->dev, "%s : cur_acl=%d\n", __func__, lcd->cur_acl);
+			}
+			break;
+		default:
+			if (lcd->cur_acl != 40) {
+				s6e8ax0_write(lcd, ACL_CUTOFF_TABLE[1], ACL_PARAM_SIZE);
+				lcd->cur_acl = 40;
+				dev_dbg(&lcd->ld->dev, "%s : cur_acl=%d\n", __func__, lcd->cur_acl);
+			}
+			break;
+		}
+	} else {
+		s6e8ax0_write(lcd, SEQ_ACL_OFF, ARRAY_SIZE(SEQ_ACL_OFF));
+		lcd->cur_acl = 0;
+		dev_dbg(&lcd->ld->dev, "%s : cur_acl=%d\n", __func__, lcd->cur_acl);
+	}
+
+	if (ret) {
+		ret = -EPERM;
+		goto acl_err;
+	}
+
+acl_err:
+	return ret;
+}
+
+#ifndef SMART_DIMMING
+static int s6e8ax0_gamma_ctl(struct lcd_info *lcd)
+{
+	/* Gamma Select */
+	s6e8ax0_write(lcd, SEQ_GAMMA_SELECT, ARRAY_SIZE(SEQ_GAMMA_SELECT));
+
+	s6e8ax0_write(lcd, lcd->gamma_table[lcd->bl], GAMMA_PARAM_SIZE);
+
+	/* Gamma Set Update */
+	s6e8ax0_write(lcd, SEQ_GAMMA_UPDATE, ARRAY_SIZE(SEQ_GAMMA_UPDATE));
+
+	lcd->current_bl = lcd->bl;
+
+	return 0;
+}
+
+static int update_brightness(struct lcd_info *lcd)
+{
+	int ret;
+
+	ret = s6e8ax0_gamma_ctl(lcd);
+	if (ret)
+		return -EPERM;
+
+	ret = s6e8ax0_set_elvss(lcd);
+	if (ret)
+		return -EPERM;
+
+	ret = s6e8ax0_set_acl(lcd);
+	if (ret)
+		return -EPERM;
+
+	return 0;
+}
 #endif
 
-	gamma_regs[0] = 0xFA;
+#ifdef SMART_DIMMING
+static int s6e8ax0_read_mtp(struct lcd_info *lcd, u8 *mtp_data)
+{
+	int ret;
 
-	gamma = brightness;
-
-	calc_gamma_table(&lcd->smart, gamma, gamma_regs+1);
-
-	s6e8ax0_write(lcd, SEQ_GAMMA_SELECT, sizeof(SEQ_GAMMA_SELECT));
-
-	s6e8ax0_write(lcd, gamma_regs, GAMMA_PARAM_SIZE);
-
-#if 0
-	printk(KERN_INFO "##### print gamma reg #####\n");
-	for (i = 0; i < 26; i++)
-		printk(KERN_INFO "[%02d] : %02x\n", i, gamma_regs[i]);
-#endif
-
-	s6e8ax0_write(lcd, SEQ_GAMMA_UPDATE, sizeof(SEQ_GAMMA_UPDATE));
+	ret = s6e8ax0_read(lcd, LDI_MTP_ADDR, LDI_MTP_LENGTH, mtp_data, 0);
 
 	return ret;
 }
 
-
-
-u32 transform_gamma(u32 brightness)
+static u32 transform_gamma(u32 brightness)
 {
 	u32 gamma;
 
@@ -676,59 +506,51 @@ u32 transform_gamma(u32 brightness)
 	return gamma - 1;
 }
 
-static int s6e8ax0_adb_brightness_update(struct lcd_info *lcd, u32 br, u32 force)
+static int s6e8ab0_update_brightness(struct lcd_info *lcd, u32 brightness)
 {
-	u32 gamma;
 	int ret = 0;
-
-	mutex_lock(&lcd->bl_lock);
-
-	lcd->bl = get_backlight_level_from_brightness(br);
-
-	/* printk("%s was called\n",__func__); */
-	/* printk("ldi_enable : %d\n",lcd->ldi_enable); */
-	/* printk("current_bl : %d, lcd->bl : %d br : %d\n",lcd->current_bl, lcd->bl, br); */
-
-	if ((force) || ((lcd->ldi_enable) && (lcd->current_bl != lcd->bl))) {
-		/* for gamma value */
-		gamma = transform_gamma(br);
-		ret = s6e8aa0_update_brightness(lcd, gamma);
-
-		/* for acl */
-		ret = s6e8ax0_set_acl(lcd);
-
-		if (lcd->support_elvss) {
-			/* for dymamic elvss */
-			ret = s6e8aa0_update_elvss(lcd, gamma);
-		} else
-			ret = s6e8ax0_set_elvss(lcd);
-
-		lcd->current_bl = lcd->bl;
-
-		dev_info(&lcd->ld->dev, "brightness=%d, gamma=%d\n", br, gamma);
-	}
-	mutex_unlock(&lcd->bl_lock);
-	return ret;
-}
+	u8 gamma_regs[GAMMA_PARAM_SIZE] = {0,};
+	u32 gamma;
+#if 0
+	int i;
 #endif
 
+	gamma_regs[0] = 0xFA;
 
+	gamma = brightness;
 
-u8 get_offset_brightness(u32 brightness)
+	calc_gamma_table(&lcd->smart, gamma, gamma_regs+1);
+
+	s6e8ax0_write(lcd, SEQ_GAMMA_SELECT, sizeof(SEQ_GAMMA_SELECT));
+
+	s6e8ax0_write(lcd, gamma_regs, GAMMA_PARAM_SIZE);
+
+#if 0
+	printk(KERN_INFO "##### print gamma reg #####\n");
+	for (i = 0; i < 26; i++)
+		printk(KERN_INFO "[%02d] : %02x\n", i, gamma_regs[i]);
+#endif
+
+	s6e8ax0_write(lcd, SEQ_GAMMA_UPDATE, sizeof(SEQ_GAMMA_UPDATE));
+
+	return ret;
+}
+
+static u8 get_offset_brightness(u32 candela)
 {
 	u8 offset = 0;
 
-	switch (brightness) {
-	case 0 ... 7:
+	switch (candela) {
+	case 30 ... 100:
 		offset = ELVSS_OFFSET_MIN;
 		break;
-	case 8 ... 13:
+	case 101 ... 150:
 		offset = ELVSS_OFFSET_1;
 		break;
-	case 14 ... 18:
+	case 151 ... 200:
 		offset = ELVSS_OFFSET_2;
 		break;
-	case 19 ...  24:
+	case 201 ...  250:
 		offset = ELVSS_OFFSET_MAX;
 		break;
 	default:
@@ -738,7 +560,7 @@ u8 get_offset_brightness(u32 brightness)
 	return offset;
 }
 
-u8 get_elvss_voltage_value(u8 limit, u8 elvss)
+static u8 get_elvss_voltage_value(u8 limit, u8 elvss)
 {
 	u8 volt;
 
@@ -747,58 +569,244 @@ u8 get_elvss_voltage_value(u8 limit, u8 elvss)
 	else if (limit == 0x01)
 		volt = ELVSS_MODE1_MIN_VOLTAGE - (elvss-1);
 	else {
-		printk("[ERROR:ELVSS]:%s undefined elvss limit value :%x\n", __func__, limit);
+		printk(KERN_ERR "[ERROR:ELVSS]:%s undefined elvss limit value :%x\n", __func__, limit);
 		return 0;
 	}
 	return volt;
 }
 
-u8 get_elvss_value(struct lcd_info *lcd, u32 brightness)
+static u8 get_elvss_value(struct lcd_info *lcd, u32 candela)
 {
 	u8 ref = 0;
 	u8 offset;
+	u8 elvss_max_value;
+
+	ref = (lcd->elvss.reference | 0x80);
 
 	if (lcd->elvss.limit == 0x00)
-		ref = (lcd->elvss.reference + 0x80);
+		elvss_max_value = DYNAMIC_ELVSS_MAX_VALUE_MODE0;
 	else if (lcd->elvss.limit == 0x01)
-		ref = (lcd->elvss.reference + 0x40);
+		elvss_max_value = DYNAMIC_ELVSS_MAX_VALUE_MODE1;
 	else {
 		printk(KERN_ERR "[ERROR:ELVSS]:%s undefined elvss limit value :%x\n", __func__, lcd->elvss.limit);
 		return 0;
 	}
 
-	offset = get_offset_brightness(lcd->bl);
+	offset = get_offset_brightness(candela);
 	ref += offset;
 
 	if (ref < DYNAMIC_ELVSS_MIN_VALUE)
 		ref = DYNAMIC_ELVSS_MIN_VALUE;
-	else if (ref > DYNAMIC_ELVSS_MAX_VALUE)
-		ref = DYNAMIC_ELVSS_MAX_VALUE;
+	else if (ref > elvss_max_value)
+		ref = elvss_max_value;
 
 	return ref;
 }
 
-int s6e8aa0_update_elvss(struct lcd_info *lcd, u32 brightness)
+static int s6e8ab0_update_elvss(struct lcd_info *lcd, u32 candela)
 {
 	u8 elvss_cmd[3];
 	u8 elvss;
 
-	elvss = get_elvss_value(lcd, brightness);
+	elvss = get_elvss_value(lcd, candela);
 	if (!elvss) {
 		printk(KERN_ERR "[ERROR:LCD]:%s:get_elvss_value() failed\n", __func__);
-		return -1;
+		return -EPERM;
 	}
 
 	elvss_cmd[0] = 0xb1;
 	elvss_cmd[1] = 0x84;
 	elvss_cmd[2] = elvss;
 
-	printk(KERN_INFO "elvss reg : %02x, Volt : %d", elvss_cmd[2], get_elvss_voltage_value(lcd->elvss.limit, elvss));
+	/* printk(KERN_INFO "elvss reg : %02x, Volt : %d", elvss_cmd[2], get_elvss_voltage_value(lcd->elvss.limit, elvss)); */
 	s6e8ax0_write(lcd, elvss_cmd, sizeof(elvss_cmd));
 
 	return 0;
 }
 
+static int s6e8ax0_adb_brightness_update(struct lcd_info *lcd, u32 br, u32 force)
+{
+	u32 gamma;
+	int ret = 0;
+
+	mutex_lock(&lcd->bl_lock);
+
+	lcd->bl = get_backlight_level_from_brightness(br);
+
+	if ((force) || ((lcd->ldi_enable) && (lcd->current_bl != lcd->bl))) {
+		/* for gamma value */
+		gamma = transform_gamma(br);
+
+		if (lcd->current_bl < lcd->bl) {
+			if (lcd->support_elvss) {
+				/* for dynamic elvss */
+				ret = s6e8ab0_update_elvss(lcd, gamma);
+			} else
+				ret = s6e8ax0_set_elvss(lcd);
+
+			ret = s6e8ab0_update_brightness(lcd, gamma);
+
+			/* for acl */
+			ret = s6e8ax0_set_acl(lcd);
+
+		} else {
+			ret = s6e8ab0_update_brightness(lcd, gamma);
+
+			/* for acl */
+			ret = s6e8ax0_set_acl(lcd);
+
+			if (lcd->support_elvss) {
+				/* for dymamic elvss */
+				ret = s6e8ab0_update_elvss(lcd, gamma);
+			} else
+				ret = s6e8ax0_set_elvss(lcd);
+		}
+		lcd->current_bl = lcd->bl;
+		dev_info(&lcd->ld->dev, "brightness=%d, gamma=%d\n", br, gamma);
+	}
+
+	mutex_unlock(&lcd->bl_lock);
+
+	return ret;
+}
+#endif
+
+static int s6e8ax0_ldi_init(struct lcd_info *lcd)
+{
+	int ret = 0;
+
+	s6e8ax0_write(lcd, SEQ_APPLY_LEVEL_2_KEY, ARRAY_SIZE(SEQ_APPLY_LEVEL_2_KEY));
+	s6e8ax0_write(lcd, SEQ_POWER_CONTROL, ARRAY_SIZE(SEQ_POWER_CONTROL));
+	s6e8ax0_write(lcd, SEQ_SLEEP_OUT, ARRAY_SIZE(SEQ_SLEEP_OUT));
+	msleep(22);	/* 1 frame + 5ms */
+
+	s6e8ax0_write(lcd, SEQ_APPLY_MTP_KEY, ARRAY_SIZE(SEQ_APPLY_MTP_KEY));
+	s6e8ax0_write(lcd, SEQ_PANEL_CONDITION_SET, ARRAY_SIZE(SEQ_PANEL_CONDITION_SET));
+#ifdef SMART_DIMMING
+	s6e8ab0_update_brightness(lcd, 30);
+#else
+	s6e8ax0_write(lcd, SEQ_GAMMA_SELECT, ARRAY_SIZE(SEQ_GAMMA_SELECT));
+	s6e8ax0_write(lcd, lcd->gamma_table[DEFAULT_GAMMA_LEVEL], GAMMA_PARAM_SIZE);
+	s6e8ax0_write(lcd, SEQ_GAMMA_UPDATE, ARRAY_SIZE(SEQ_GAMMA_UPDATE));
+#endif
+	s6e8ax0_write(lcd, SEQ_ETC_PWRCTL, ARRAY_SIZE(SEQ_ETC_PWRCTL));
+	s6e8ax0_write(lcd, SEQ_ETC_SOURCE_CONTROL, ARRAY_SIZE(SEQ_ETC_SOURCE_CONTROL));
+	s6e8ax0_write(lcd, SEQ_ELVSS_DEFAULT, ARRAY_SIZE(SEQ_ELVSS_DEFAULT));
+	s6e8ax0_write(lcd, SEQ_ETC_NVM_SETTING, ARRAY_SIZE(SEQ_ETC_NVM_SETTING));
+	s6e8ax0_write(lcd, SEQ_ELVSS_ON, ARRAY_SIZE(SEQ_ELVSS_ON));
+	s6e8ax0_write(lcd, SEQ_ELVSS_44, ARRAY_SIZE(SEQ_ELVSS_44));
+
+	s6e8ax0_write(lcd, SEQ_ACL_CUTOFF_40, ACL_PARAM_SIZE);
+
+	s6e8ax0_write(lcd, SEQ_VREGOUT_SET, ARRAY_SIZE(SEQ_VREGOUT_SET));
+
+	return ret;
+}
+
+static int s6e8ax0_ldi_enable(struct lcd_info *lcd)
+{
+	int ret = 0;
+
+	s6e8ax0_write(lcd, SEQ_DISPLAY_ON, ARRAY_SIZE(SEQ_DISPLAY_ON));
+
+	return ret;
+}
+
+static int s6e8ax0_ldi_disable(struct lcd_info *lcd)
+{
+	int ret = 0;
+
+	s6e8ax0_write(lcd, SEQ_DISPLAY_OFF, ARRAY_SIZE(SEQ_DISPLAY_OFF));
+	s6e8ax0_write(lcd, SEQ_STANDBY_ON, ARRAY_SIZE(SEQ_STANDBY_ON));
+
+	return ret;
+}
+
+static int s6e8ax0_power_on(struct lcd_info *lcd)
+{
+	int ret = 0;
+	struct lcd_platform_data *pd = NULL;
+	pd = lcd->lcd_pd;
+
+	/* dev_info(&lcd->ld->dev, "%s\n", __func__); */
+
+	ret = s6e8ax0_ldi_init(lcd);
+	if (ret) {
+		dev_err(&lcd->ld->dev, "failed to initialize ldi.\n");
+		goto err;
+	}
+
+	msleep(120);
+
+	ret = s6e8ax0_ldi_enable(lcd);
+	if (ret) {
+		dev_err(&lcd->ld->dev, "failed to enable ldi.\n");
+		goto err;
+	}
+
+#ifdef SMART_DIMMING
+	lcd->ldi_enable = 1;
+
+	s6e8ax0_adb_brightness_update(lcd, lcd->bd->props.brightness, 1);
+#else
+	update_brightness(lcd);
+
+	lcd->ldi_enable = 1;
+#endif
+
+err:
+	return ret;
+}
+
+static int s6e8ax0_power_off(struct lcd_info *lcd)
+{
+	int ret = 0;
+
+	dev_info(&lcd->ld->dev, "%s\n", __func__);
+
+	lcd->ldi_enable = 0;
+
+	ret = s6e8ax0_ldi_disable(lcd);
+
+	msleep(120);
+
+	return ret;
+}
+
+static int s6e8ax0_power(struct lcd_info *lcd, int power)
+{
+	int ret = 0;
+
+	if (POWER_IS_ON(power) && !POWER_IS_ON(lcd->power))
+		ret = s6e8ax0_power_on(lcd);
+	else if (!POWER_IS_ON(power) && POWER_IS_ON(lcd->power))
+		ret = s6e8ax0_power_off(lcd);
+
+	if (!ret)
+		lcd->power = power;
+
+	return ret;
+}
+
+static int s6e8ax0_set_power(struct lcd_device *ld, int power)
+{
+	struct lcd_info *lcd = lcd_get_data(ld);
+
+	if (power != FB_BLANK_UNBLANK && power != FB_BLANK_POWERDOWN &&
+		power != FB_BLANK_NORMAL) {
+		dev_err(&lcd->ld->dev, "power value should be 0, 1 or 4.\n");
+		return -EINVAL;
+	}
+
+	return s6e8ax0_power(lcd, power);
+}
+
+static int s6e8ax0_get_power(struct lcd_device *ld)
+{
+	struct lcd_info *lcd = lcd_get_data(ld);
+
+	return lcd->power;
+}
 
 #ifdef SMART_DIMMING
 static int s6e8ax0_set_brightness(struct backlight_device *bd)
@@ -808,13 +816,6 @@ static int s6e8ax0_set_brightness(struct backlight_device *bd)
 
 	struct lcd_info *lcd = bl_get_data(bd);
 
-	/* global_brightness = brightness;
-
-	if (brightness == lcd->bl)
-		return 0;
-
-	lcd->bl = brightness; */
-
 	if (brightness < MIN_BRIGHTNESS ||
 		brightness > bd->props.max_brightness) {
 		dev_err(&bd->dev, "lcd brightness should be %d to %d. now %d\n",
@@ -822,7 +823,7 @@ static int s6e8ax0_set_brightness(struct backlight_device *bd)
 		return -EINVAL;
 	}
 
-	/* dev_info(&lcd->ld->dev, "brightness=%d\n", brightness); */
+	/* dev_info(&lcd->ld->dev, "%s: brightness=%d\n", __func__, brightness); */
 
 	ret = s6e8ax0_adb_brightness_update(lcd, brightness, 0);
 
@@ -834,6 +835,8 @@ static int s6e8ax0_set_brightness(struct backlight_device *bd)
 	int ret = 0;
 	int brightness = bd->props.brightness;
 	struct lcd_info *lcd = bl_get_data(bd);
+
+	/* dev_info(&lcd->ld->dev, "%s: brightness=%d\n", __func__, brightness); */
 
 	if (brightness < MIN_BRIGHTNESS ||
 		brightness > bd->props.max_brightness) {
@@ -872,50 +875,8 @@ static const struct backlight_ops s6e8ax0_backlight_ops  = {
 	.update_status = s6e8ax0_set_brightness,
 };
 
-#ifdef SMART_DIMMING
-const u8 enable_mtp_register[] = {
-	0xf1,
-	0x5a,
-	0x5a,
-};
-
-const u8 disable_mtp_register[] = {
-	0xf1,
-	0xa5,
-	0xa5,
-};
-
-#if 0
-static s16 s9_to_s16(s16 v)
-{
-	return (s16)(v << 7) >> 7;
-}
-#endif
-
-int s6e8ax0_read_mtp(struct lcd_info *lcd, u8 *mtp_data)
-{
-	int ret;
-	u8 retry_cnt = 3;
-
-	s6e8ax0_write(lcd, enable_mtp_register, ARRAY_SIZE(enable_mtp_register));
-
-read_retry:
-	ret = s6e8ax0_read(lcd, LDI_MTP_ADDR, LDI_MTP_LENGTH, mtp_data);
-	if (!ret) {
-		if (retry_cnt) {
-			printk(KERN_WARNING "[WARN:LCD] : %s : retry cnt : %d\n", __func__, retry_cnt);
-			retry_cnt--;
-			goto read_retry;
-		} else
-			printk(KERN_ERR "ERROR:MTP read failed\n");
-	}
-
-	s6e8ax0_write(lcd, disable_mtp_register, ARRAY_SIZE(disable_mtp_register));
-	return ret;
-}
-#endif
-
-static ssize_t lcdtype_show(struct device *dev, struct device_attribute *attr, char *buf)
+static ssize_t lcdtype_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
 {
 	char temp[15];
 	sprintf(temp, "SMD_AMS767KC01\n");
@@ -925,7 +886,8 @@ static ssize_t lcdtype_show(struct device *dev, struct device_attribute *attr, c
 
 static DEVICE_ATTR(lcdtype, 0444, lcdtype_show, NULL);
 
-static ssize_t acl_enable_show(struct device *dev, struct device_attribute *attr, char *buf)
+static ssize_t acl_enable_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
 {
 	struct lcd_info *lcd = dev_get_drvdata(dev);
 	char temp[3];
@@ -935,7 +897,9 @@ static ssize_t acl_enable_show(struct device *dev, struct device_attribute *attr
 
 	return strlen(buf);
 }
-static ssize_t acl_enable_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t size)
+
+static ssize_t acl_enable_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t size)
 {
 	struct lcd_info *lcd = dev_get_drvdata(dev);
 	int value;
@@ -951,13 +915,15 @@ static ssize_t acl_enable_store(struct device *dev, struct device_attribute *att
 			if (lcd->ldi_enable)
 				s6e8ax0_set_acl(lcd);
 		}
-		return 0;
 	}
+	return size;
 }
 
 static DEVICE_ATTR(acl_enable, 0664, acl_enable_show, acl_enable_store);
 
-static ssize_t gamma_table_show(struct device *dev, struct device_attribute *attr, char *buf)
+#ifndef SMART_DIMMING
+static ssize_t gamma_table_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
 {
 	struct lcd_info *lcd = dev_get_drvdata(dev);
 	int i, j;
@@ -971,9 +937,11 @@ static ssize_t gamma_table_show(struct device *dev, struct device_attribute *att
 	return strlen(buf);
 }
 static DEVICE_ATTR(gamma_table, 0444, gamma_table_show, NULL);
+#endif
 
 #ifdef SMART_DIMMING
-static ssize_t mtp_show(struct device *dev, struct device_attribute *attr, char *buf)
+static ssize_t mtp_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
 {
 	int i, j;
 	unsigned int cnt;
@@ -1000,7 +968,8 @@ static ssize_t mtp_show(struct device *dev, struct device_attribute *attr, char 
 
 static DEVICE_ATTR(mtp, 0444, mtp_show, NULL);
 
-static ssize_t gamma_show(struct device *dev, struct device_attribute *attr, char *buf)
+static ssize_t gamma_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
 {
 	/* this function show default gamma value for 300cd */
 	int i, j;
@@ -1016,14 +985,15 @@ static ssize_t gamma_show(struct device *dev, struct device_attribute *attr, cha
 	return cnt;
 }
 
-static ssize_t gamma_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t size)
+static ssize_t gamma_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t size)
 {
-	/*  this function can set brightness */
+	/* this function can set brightness */
 	struct lcd_info *lcd = dev_get_drvdata(dev);
 	int value;
 
 	sscanf(buf, "%d", &value);
-	printk(KERN_INFO "%s : %d\n", __func__, value);
+	printk(KERN_DEBUG "%s : %d\n", __func__, value);
 	s6e8ax0_adb_brightness_update(lcd, value, 1);
 
 	return size;
@@ -1032,27 +1002,7 @@ static ssize_t gamma_store(struct device *dev, struct device_attribute *attr, co
 static DEVICE_ATTR(gamma, 0444, gamma_show, gamma_store);
 #endif
 
-static ssize_t id_show(struct device *dev, struct device_attribute *attr, char *buf)
-{
-	int cnt, ret;
-	char rd_buf[RD_CNT] = {0,};
-	int rdcnt = RD_CNT;
-	struct lcd_info *lcd = dev_get_drvdata(dev);
-
-	ret = s6e8ax0_read(lcd, 0xd1, rdcnt, rd_buf);
-	if (!ret) {
-		printk(KERN_ERR "[ERROR:LCD] : %s :s6e8ax0_read failed\n", __func__);
-		return -1;
-	}
-	cnt = sprintf(buf, "READ ID  : 0x%02x 0x%02x 0x%02x\n", rd_buf[0], rd_buf[1], rd_buf[2]);
-
-	return cnt;
-}
-
-static DEVICE_ATTR(id, 0444, id_show, NULL);
-
 #ifdef CONFIG_HAS_EARLYSUSPEND
-
 struct lcd_info *g_lcd;
 
 void s6e8ax0_early_suspend(void)
@@ -1078,17 +1028,67 @@ void s6e8ax0_late_resume(void)
 }
 #endif
 
+static void s6e8ax0_read_id(struct lcd_info *lcd, u8 *buf)
+{
+	int ret = 0;
+
+	ret = s6e8ax0_read(lcd, LDI_ID_REG, LDI_ID_LEN, buf, 3);
+	if (!ret) {
+		/* To protect ELVSS Wrong Operation */
+		buf[0] = 0xA2;
+		buf[1] = 0x15;
+		buf[2] = 0x44;
+		lcd->connected = 0;
+		dev_info(&lcd->ld->dev, "panel is not connected well\n");
+	}
+
+	SEQ_VREGOUT_SET[1] = buf[0];
+	SEQ_VREGOUT_SET[2] = buf[1];
+	SEQ_VREGOUT_SET[3] = buf[2];
+
+	if ((buf[0] == 0xa2) && (buf[1] == 0x25))
+		lcd->lcd_id = LCD_TYPE_A2_M3;
+	else if ((buf[0] == 0xfe) && (buf[1] == 0x83))	/* wrong ID */
+		lcd->lcd_id = LCD_TYPE_A2_M3;
+	else if ((buf[0] == 0xfe) && (buf[1] == 0x80))	/* wrong ID */
+		lcd->lcd_id = LCD_TYPE_A2_M3;
+	else if ((buf[0] == 0xa2) && (buf[1] == 0x15))
+		lcd->lcd_id = LCD_TYPE_A2_SM2;
+	else
+		lcd->lcd_id = LCD_TYPE_A2_SM2;
+}
+
+#ifdef SMART_DIMMING
+static void s6e8aa0_check_id(struct lcd_info *lcd, u8 *idbuf)
+{
+	u32 i;
+
+	if ((idbuf[0] == 0xa2) && (idbuf[2] != 0x44))
+		lcd->support_elvss = 1;
+
+	if (lcd->support_elvss) {
+		lcd->elvss.limit = (idbuf[2] & 0xc0) >> 6;
+		lcd->elvss.reference = idbuf[2] & 0x3f;
+		printk(KERN_INFO "ID-3 is 0x%x support dynamic elvss\n", idbuf[2]);
+		printk(KERN_INFO "Dynamic ELVSS Information\n");
+		printk(KERN_INFO "limit    : %02x\n", lcd->elvss.limit);
+		printk(KERN_INFO "Refrence : %02x Volt : %d\n", lcd->elvss.reference,
+		get_elvss_voltage_value(lcd->elvss.limit, lcd->elvss.reference));
+	}
+
+	for (i = 0; i < LDI_ID_LEN; i++)
+		lcd->smart.panelid[i] = idbuf[i];
+}
+#endif
+
 static int s6e8ax0_probe(struct device *dev)
 {
 	int ret = 0;
 	struct lcd_info *lcd;
-	struct platform_device *pdev = to_platform_device(dev);
-	struct s5p_platform_dsim *pd = (struct s5p_platform_dsim *)pdev->dev.platform_data;
 #ifdef SMART_DIMMING
 	u8 mtp_data[LDI_MTP_LENGTH] = {0,};
-	u32 i;
-	u8 retry_cnt = 3;
 #endif
+	u8 buf[LDI_ID_LEN] = {0,};
 
 	lcd = kzalloc(sizeof(struct lcd_info), GFP_KERNEL);
 	if (!lcd) {
@@ -1132,105 +1132,71 @@ static int s6e8ax0_probe(struct device *dev)
 	if (ret < 0)
 		dev_err(&lcd->ld->dev, "failed to add sysfs entries, %d\n", __LINE__);
 
-	ret = device_create_file(&lcd->ld->dev, &dev_attr_gamma_table);
-	if (ret < 0)
-		dev_err(&lcd->ld->dev, "failed to add sysfs entries, %d\n", __LINE__);
-
 	ret = device_create_file(&lcd->ld->dev, &dev_attr_lcdtype);
 	if (ret < 0)
 		dev_err(&lcd->ld->dev, "failed to add sysfs entries, %d\n", __LINE__);
 
-#ifdef SMART_DIMMING
-	ret = device_create_file(lcd->dev, &dev_attr_mtp);
-	if (ret < 0)
-		dev_err(&lcd->ld->dev, "failed to add sysfs entries, %d\n", __LINE__);
-	ret = device_create_file(lcd->dev, &dev_attr_gamma);
+#ifndef SMART_DIMMING
+	ret = device_create_file(&lcd->ld->dev, &dev_attr_gamma_table);
 	if (ret < 0)
 		dev_err(&lcd->ld->dev, "failed to add sysfs entries, %d\n", __LINE__);
 #endif
 
-	ret = device_create_file(lcd->dev, &dev_attr_id);
+#ifdef SMART_DIMMING
+	ret = device_create_file(&lcd->ld->dev, &dev_attr_mtp);
 	if (ret < 0)
 		dev_err(&lcd->ld->dev, "failed to add sysfs entries, %d\n", __LINE__);
 
+	ret = device_create_file(&lcd->ld->dev, &dev_attr_gamma);
+	if (ret < 0)
+		dev_err(&lcd->ld->dev, "failed to add sysfs entries, %d\n", __LINE__);
+#endif
 	dev_set_drvdata(dev, lcd);
 
 #if 0
+#ifdef CONFIG_HAS_EARLYSUSPEND
 	lcd->early_suspend.suspend = s6e8ax0_early_suspend;
 	lcd->early_suspend.resume = s6e8ax0_late_resume;
 	lcd->early_suspend.level = EARLY_SUSPEND_LEVEL_DISABLE_FB - 2;
 	register_early_suspend(&lcd->early_suspend);
 #endif
-	lcd->lcd_id = pd->dsim_lcd_info->lcd_id;
-
-#ifndef SMART_DIMMING
-	if (lcd->lcd_id == 1) {
-		lcd->gamma_table = gamma22_table_m3;
-		dev_info(&lcd->ld->dev, "s6e8aa0 lcd panel gamma data has been switched for M3\n");
-	} else if (lcd->lcd_id == 2) {
-		lcd->gamma_table = gamma22_table_sm2;
-		dev_info(&lcd->ld->dev, "s6e8aa0 lcd panel gamma data has been switched for SM2\n");
-	} else {
-		lcd->gamma_table = gamma22_table_sm2;
-		dev_info(&lcd->ld->dev, "unknown lcd id : s6e8aa0 lcd panel gamma data has been switched for SM2\n");
-	}
 #endif
 
 	mutex_init(&lcd->lock);
 
+	s6e8ax0_read_id(lcd, buf);
+
+	dev_info(&lcd->ld->dev, "ID: %x, %x, %x\n", buf[0], buf[1], buf[2]);
+
 	dev_info(&lcd->ld->dev, "s6e8ab0 lcd panel driver has been probed.\n");
 
+#ifndef SMART_DIMMING
+	if (lcd->lcd_id == LCD_TYPE_A2_M3) {
+		lcd->gamma_table = gamma22_table_m3;
+		dev_info(&lcd->ld->dev, "s6e8ab0 lcd panel gamma data has been switched for M3\n");
+	} else if (lcd->lcd_id == LCD_TYPE_A2_SM2) {
+		lcd->gamma_table = gamma22_table_sm2;
+		dev_info(&lcd->ld->dev, "s6e8ab0 lcd panel gamma data has been switched for SM2\n");
+	} else {
+		lcd->gamma_table = gamma22_table_sm2;
+		dev_info(&lcd->ld->dev, "unknown lcd id : s6e8ab0 lcd panel gamma data has been switched for SM2\n");
+	}
+#endif
+
 #ifdef SMART_DIMMING
-	mutex_init(&lcd->bl_lock);
-
-read_retry:
-	ret = s6e8ax0_read(lcd, 0xd1, RD_CNT, g_idbuf);
-	if (!ret) {
-		if (retry_cnt) {
-			printk(KERN_WARNING "[WARN:LCD] : %s : retry cnt : %d\n", __func__, retry_cnt);
-			retry_cnt--;
-			goto read_retry;
-		} else {
-			printk(KERN_ERR "[ERROR:LCD] : %s : Read ID Failed\n", __func__);
-			/*To protect ELVSS Wrong Operation*/
-			g_idbuf[0] = 0xA2;
-			g_idbuf[1] = 0x15;
-			g_idbuf[2] = 0x44;
-			dev_info(&lcd->ld->dev, "panel is not connected well\n");
-		}
-	}
-
-	printk(KERN_INFO "Read ID : %x, %x, %x\n", g_idbuf[0], g_idbuf[1], g_idbuf[2]);
-
-	lcd->support_elvss = 0;
-
-	if ((lcd->lcd_id == 2) && (g_idbuf[2] != 0x44))
-		lcd->support_elvss = 1;
-
-	if (lcd->support_elvss) {
-		lcd->elvss.limit = (g_idbuf[2] & 0xc0) >> 6;
-		lcd->elvss.reference = g_idbuf[2] & 0x3f;
-		printk(KERN_INFO "ID-3 is 0x%x support dynamic elvss\n", g_idbuf[2]);
-		printk(KERN_INFO "Dynamic ELVSS Information\n");
-		printk(KERN_INFO "limit    : %02x\n", lcd->elvss.limit);
-		printk(KERN_INFO "Refrence : %02x Volt : %d\n", lcd->elvss.reference,
-		get_elvss_voltage_value(lcd->elvss.limit, lcd->elvss.reference));
-	}
-
-	for (i = 0; i < PANEL_ID_MAX; i++)
-		lcd->smart.panelid[i] = g_idbuf[i];
+	s6e8aa0_check_id(lcd, buf);
 
 	init_table_info(&lcd->smart, lcd->lcd_id);
 
 	ret = s6e8ax0_read_mtp(lcd, mtp_data);
 	if (!ret) {
 		printk(KERN_ERR "[LCD:ERROR] : %s read mtp failed\n", __func__);
-		lcd->connected = 0;
-		dev_info(&lcd->ld->dev, "panel is not connected well\n");
-		/*return -1;*/
+		/*return -EPERM;*/
 	}
 
 	calc_voltage_table(&lcd->smart, mtp_data);
+
+	mutex_init(&lcd->bl_lock);
 
 	s6e8ax0_adb_brightness_update(lcd, lcd->bd->props.brightness, 1);
 #endif
@@ -1249,7 +1215,6 @@ out_free_lcd:
 err_alloc:
 	return ret;
 }
-
 
 static int __devexit s6e8ax0_remove(struct device *dev)
 {
@@ -1275,27 +1240,15 @@ static void s6e8ax0_shutdown(struct device *dev)
 
 static struct mipi_lcd_driver s6e8ax0_mipi_driver = {
 	.name = "s6e8ab0",
-/*	.init			= s6e8ax0_panel_init,	*/
-/*	.display_on		= s6e8ax0_display_on,	*/
-/*	.display_off		= s6e8ax0_display_off,	*/
 	.set_link		= s6e8ax0_set_link,
 	.probe			= s6e8ax0_probe,
 	.remove			= __devexit_p(s6e8ax0_remove),
 	.shutdown		= s6e8ax0_shutdown,
-
-#if 0
-	/* add lcd partial and dim mode functionalies */
-	.partial_mode_status = s6e8ax0_partial_mode_status,
-	.partial_mode_on	= s6e8ax0_partial_mode_on,
-	.partial_mode_off	= s6e8ax0_partial_mode_off,
-#endif
 };
 
 static int s6e8ax0_init(void)
 {
-	s5p_dsim_register_lcd_driver(&s6e8ax0_mipi_driver);
-
-	return 0;
+	return s5p_dsim_register_lcd_driver(&s6e8ax0_mipi_driver);
 }
 
 static void s6e8ax0_exit(void)
@@ -1308,4 +1261,3 @@ module_exit(s6e8ax0_exit);
 
 MODULE_DESCRIPTION("MIPI-DSI S6E8AB0:AMS767KC01 (1280x800) Panel Driver");
 MODULE_LICENSE("GPL");
-

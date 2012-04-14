@@ -307,6 +307,8 @@ static void mxt_ta_worker(struct work_struct *work)
 	u8 tchthr = mxt->pdata->touchscreen_config.tchthr;
 	u8 noisethr = mxt->pdata->noise_suppression_config.noisethr;
 	u8 idlegcafdepth = mxt->pdata->cte_config.idlegcafdepth;
+	u8 movefilter = mxt->pdata->touchscreen_config.movfilter;
+	u8 idleacqint = mxt->pdata->power_config.idleacqint;
 	u8 freq[5] = {0,};
 	int error = 0, i = 0;
 
@@ -321,24 +323,23 @@ static void mxt_ta_worker(struct work_struct *work)
 		noisethr = mxt->pdata->noisethr_for_ta_connect;
 		idlegcafdepth = mxt->pdata->idlegcafdepth_ta_connect;
 
-		if (mxt->pdata->fherr_cnt >= 9) {
+		if (mxt->pdata->fherr_cnt >= 2) {
 			blen = mxt->pdata->tch_blen_for_fherr;
 			tchthr = mxt->pdata->tchthr_for_fherr;
 			noisethr = mxt->pdata->noisethr_for_fherr;
-			for (i = 0; i < 5; i++)
-				freq[i] = mxt->pdata->freq_for_fherr3[i];
-		} else if (mxt->pdata->fherr_cnt >= 6) {
-			blen = mxt->pdata->tch_blen_for_fherr;
-			tchthr = mxt->pdata->tchthr_for_fherr;
-			noisethr = mxt->pdata->noisethr_for_fherr;
-			for (i = 0; i < 5; i++)
-				freq[i] = mxt->pdata->freq_for_fherr2[i];
-		} else if (mxt->pdata->fherr_cnt >= 3) {
-			blen = mxt->pdata->tch_blen_for_fherr;
-			tchthr = mxt->pdata->tchthr_for_fherr;
-			noisethr = mxt->pdata->noisethr_for_fherr;
-			for (i = 0; i < 5; i++)
-				freq[i] = mxt->pdata->freq_for_fherr1[i];
+			movefilter = mxt->pdata->movefilter_for_fherr;
+			idleacqint = mxt->pdata->idleacqint_for_fherr;
+			for (i = 0; i < 5; i++) {
+				if (mxt->pdata->fherr_cnt >= 6)
+					freq[i] =
+						mxt->pdata->freq_for_fherr3[i];
+				else if (mxt->pdata->fherr_cnt >= 4)
+					freq[i] =
+						mxt->pdata->freq_for_fherr2[i];
+				else
+					freq[i] =
+						mxt->pdata->freq_for_fherr1[i];
+			}
 		}
 	}
 
@@ -382,6 +383,24 @@ static void mxt_ta_worker(struct work_struct *work)
 		MXT_BASE_ADDR(MXT_SPT_CTECONFIG_T28)
 		+ MXT_ADR_T28_IDLEGCAFDEPTH,
 		idlegcafdepth);
+	if (error < 0)
+		pr_err("[sec_touch] error %s: write_object : idlegcafdepth\n",
+				__func__);
+
+	/* idleacqint change*/
+	error = mxt_write_byte(mxt->client,
+		MXT_BASE_ADDR(MXT_GEN_POWERCONFIG_T7)
+		+ MXT_ADR_T7_IDLEACQINT,
+		idleacqint);
+	if (error < 0)
+		pr_err("[sec_touch] error %s: write_object : idleacqint\n",
+				__func__);
+
+	/* move filter change */
+	error = mxt_write_byte(mxt->client,
+		MXT_BASE_ADDR(MXT_TOUCH_MULTITOUCHSCREEN_T9)
+		+ MXT_ADR_T9_MOVFILTER,
+		movefilter);
 	if (error < 0)
 		pr_err("[sec_touch] error %s: write_object : idlegcafdepth\n",
 				__func__);
@@ -976,9 +995,9 @@ int process_message(struct mxt_data *mxt, u8 *message, u8 object)
 					"Noise level too high\n");
 
 			mxt->pdata->fherr_cnt++;
-			if (12 == mxt->pdata->fherr_cnt)
+			if (7 == mxt->pdata->fherr_cnt)
 				mxt->pdata->fherr_cnt = 1;
-			if (0 == (mxt->pdata->fherr_cnt%3)) {
+			if (0 == (mxt->pdata->fherr_cnt % 2)) {
 				if (!work_pending(&mxt->ta_work))
 					schedule_work(&mxt->ta_work);
 			}
@@ -1807,14 +1826,281 @@ static DEVICE_ATTR(object_info, S_IRUGO, show_object_info, NULL);
 static DEVICE_ATTR(messages,    S_IRUGO, show_messages,    NULL);
 static DEVICE_ATTR(report_id,   S_IRUGO, show_report_id,   NULL);
 static DEVICE_ATTR(stat,        S_IRUGO, show_stat,        NULL);
-static DEVICE_ATTR(config,      S_IWUSR|S_IRUGO, get_config, set_config);
+static DEVICE_ATTR(config,      S_IWUSR | S_IRUGO, get_config, set_config);
 static DEVICE_ATTR(ap,          S_IWUSR, NULL,             set_ap);
 static DEVICE_ATTR(debug, S_IWUSR, NULL, set_debug);
-static DEVICE_ATTR(fw_dev, S_IWUSR|S_IRUGO, show_firmware_dev, store_firmware);
+static DEVICE_ATTR(fw_dev, S_IWUSR | S_IRUGO,
+	show_firmware_dev, store_firmware);
 static DEVICE_ATTR(fw_bin, S_IRUGO, show_firmware_bin, NULL);
-static DEVICE_ATTR(object, S_IWUSR|S_IRUGO, show_object, store_object);
+static DEVICE_ATTR(object, S_IWUSR | S_IRUGO, show_object, store_object);
 
-#ifdef ENABLE_NOISE_TEST_MODE
+static int enter_debug_mode(struct mxt_data *mxt, u8 cmd)
+{
+	int try_cnt = 0;
+	u8 mode = 0;
+	u16 cmd_addr = T6_REG(MXT_ADR_T6_DIAGNOSTICS);
+	u16 diagnostic_addr = MXT_BASE_ADDR(MXT_DEBUG_DIAGNOSTICS_T37);
+
+	/* Page Num Clear */
+	mxt_write_byte(mxt->client, cmd_addr, MXT_CMD_T6_CTE_MODE);
+	msleep(20);
+	mxt_write_byte(mxt->client, cmd_addr, cmd);
+	msleep(20);
+
+	/* check the mode */
+	do {
+		mxt_read_byte(mxt->client, diagnostic_addr, &mode);
+		if (cmd == mode) {
+			printk(KERN_DEBUG
+				"[TSP] debug mode : %s\n",
+				cmd == MXT_CMD_T6_REFERENCES_MODE ?
+				"reference" : "delta");
+			return 0;
+		}
+		try_cnt++;
+		msleep(20);
+	} while (try_cnt < 5);
+
+	return -EAGAIN;
+}
+
+static int read_all_refdata(struct mxt_data *mxt)
+{
+	int status = -EAGAIN, try_cnt = 0;
+	int ret;
+	u8 mode = 0, read_page = 0, read_point = 0,
+		max_page_slave = 0, numofch = 0;
+	u8 dbg_data[MXT1386_PAGE_SIZE * 2];
+	u16 max_val = 0, min_val = 0, ref_val = 0;
+	const u16 cmd_addr = T6_REG(MXT_ADR_T6_DIAGNOSTICS);
+	const u16 diagnostic_addr = MXT_BASE_ADDR(MXT_DEBUG_DIAGNOSTICS_T37);
+
+	mxt->index = 0;
+
+	if (enter_debug_mode(mxt, MXT_CMD_T6_REFERENCES_MODE))
+		return -EAGAIN;
+
+	max_page_slave =
+		(u8)((mxt->pdata->touchscreen_config.xsize * MXT1386_PAGE_WIDTH)
+		/ MXT1386_PAGE_SIZE);
+
+	do {
+		if (MXT1386_MAX_PAGE == read_page) {
+			if (1 != status)
+				status = 0;
+			break;
+		}
+
+		if ((read_page % MXT1386_PAGE_SIZE_SLAVE) < max_page_slave)
+			numofch = (u8)(MXT1386_PAGE_SIZE * 2);
+		else if ((read_page % MXT1386_PAGE_SIZE_SLAVE)
+			== max_page_slave)
+			numofch =
+				(u8)(((mxt->pdata->touchscreen_config.xsize
+				* MXT1386_PAGE_WIDTH)
+				- (max_page_slave * MXT1386_PAGE_SIZE)) * 2);
+		else {
+			read_page++;
+			mxt_write_byte(mxt->client,
+				cmd_addr, MXT_CMD_T6_PAGE_UP);
+			msleep(20);
+			continue;
+		}
+
+		mxt_read_byte(mxt->client, diagnostic_addr+1, &mode);
+		if (mode == read_page) {
+			mxt_read_block(mxt->client,
+				diagnostic_addr + 2, numofch, dbg_data);
+			for (read_point = 0; read_point < numofch;
+				read_point += 2) {
+				ref_val = (u16)dbg_data[read_point] |
+					(u16)dbg_data[read_point+1] << 8;
+				if (ref_val > MXT1386_MAX_REF_VALUE) {
+					max_val = ref_val;
+					status = 1;
+				} else if (ref_val < MXT1386_MIN_REF_VALUE) {
+					min_val = ref_val;
+					status = 1;
+				}
+
+				if (ref_val > max_val)
+					max_val = ref_val;
+				else if (ref_val < min_val)
+					min_val = ref_val;
+
+				mxt->ref_data[mxt->index++] = ref_val;
+			}
+
+			read_page++;
+			mxt_write_byte(mxt->client,
+				cmd_addr,
+				MXT_CMD_T6_PAGE_UP);
+			msleep(20);
+
+		} else {
+			try_cnt++;
+			if (mode < read_page)
+				mxt_write_byte(mxt->client,
+					cmd_addr,
+					MXT_CMD_T6_PAGE_UP);
+			msleep(20);
+		}
+	} while (try_cnt < 10);
+
+	printk(KERN_DEBUG "[TSP] max_val : %d,"
+		" min_val : %u  status : %u\n", max_val, min_val, status);
+	return status;
+}
+
+static void  read_all_deltadata(struct mxt_data *mxt)
+{
+	int try_cnt = 0;
+	u8 mode = 0, read_page = 0, read_point = 0,
+		max_page_slave = 0, numofch = 0;
+	u8 dbg_data[MXT1386_PAGE_SIZE * 2];
+	u16 delta_val = 0;
+	const u16 cmd_addr = T6_REG(MXT_ADR_T6_DIAGNOSTICS);
+	const u16 diagnostic_addr = MXT_BASE_ADDR(MXT_DEBUG_DIAGNOSTICS_T37);
+
+	mxt->index = 0;
+
+	enter_debug_mode(mxt, MXT_CMD_T6_DELTAS_MODE);
+
+	max_page_slave =
+		(mxt->pdata->touchscreen_config.xsize * MXT1386_PAGE_WIDTH)
+		/ MXT1386_PAGE_SIZE;
+
+	do {
+		if (MXT1386_MAX_PAGE == read_page)
+			break;
+
+		if ((read_page % MXT1386_PAGE_SIZE_SLAVE) < max_page_slave)
+			numofch = (u8)(MXT1386_PAGE_SIZE * 2);
+		else if ((read_page % MXT1386_PAGE_SIZE_SLAVE)
+			== max_page_slave)
+			numofch =
+				(u8)(((mxt->pdata->touchscreen_config.xsize
+				* MXT1386_PAGE_WIDTH)
+				- (max_page_slave * MXT1386_PAGE_SIZE)) * 2);
+		else {
+			read_page++;
+			mxt_write_byte(mxt->client,
+				cmd_addr, MXT_CMD_T6_PAGE_UP);
+			msleep(20);
+			continue;
+		}
+
+		mxt_read_byte(mxt->client, diagnostic_addr+1, &mode);
+		if (mode == read_page) {
+			mxt_read_block(mxt->client,
+				diagnostic_addr + 2, numofch, dbg_data);
+			for (read_point = 0; read_point < numofch;
+				read_point += 2) {
+				delta_val = (u16)dbg_data[read_point] |
+					(u16)dbg_data[read_point+1] << 8;
+
+				mxt->delta_data[mxt->index++] = delta_val;
+			}
+
+			read_page++;
+			mxt_write_byte(mxt->client,
+				cmd_addr,
+				MXT_CMD_T6_PAGE_UP);
+			msleep(20);
+
+		} else {
+			try_cnt++;
+			msleep(20);
+		}
+	} while (try_cnt < 10);
+}
+
+static void mxt_read_2byte(u16 Address, u16 *Data, struct mxt_data *mxt)
+{
+	u8 temp[2];
+	mxt_read_block(mxt->client, Address, 2, temp);
+	*Data = ((uint16_t)temp[1]<<8) + (uint16_t)temp[0];
+}
+
+static void check_debug_data(struct mxt_data *mxt, u16 node, u8 mode)
+{
+	int try_cnt = 0;
+	u8 read_page = 0, read_point = 0, current_page = 0, value = 0;
+	u16 debug_val = 0;
+	const u16 cmd_addr = T6_REG(MXT_ADR_T6_DIAGNOSTICS);
+	const u16 diagnostic_addr = MXT_BASE_ADDR(MXT_DEBUG_DIAGNOSTICS_T37);
+
+	enter_debug_mode(mxt, mode);
+
+	read_page = node / 64;
+	read_point = ((node % 64) * 2) + 2;
+
+	do {
+		if (current_page == read_page)
+			break;
+
+		mxt_read_byte(mxt->client, diagnostic_addr+1, &value);
+
+		if (current_page == value)
+			current_page++;
+		else {
+			try_cnt++;
+			msleep(20);
+			continue;
+		}
+
+		mxt_write_byte(mxt->client,
+			cmd_addr,
+			MXT_CMD_T6_PAGE_UP);
+		msleep(20);
+
+	} while (try_cnt < 10);
+
+	mxt_read_2byte(diagnostic_addr + read_point, &debug_val, mxt);
+
+	if (MXT_CMD_T6_REFERENCES_MODE == mode)
+		mxt->ref_data[node] = debug_val;
+	else if (MXT_CMD_T6_DELTAS_MODE == mode)
+		mxt->delta_data[node] = debug_val;
+
+	printk(KERN_DEBUG "[TSP] %s[%d] : %d\n",
+		mode == MXT_CMD_T6_REFERENCES_MODE ? "ref" : "delta",
+		node, debug_val);
+}
+
+static int check_all_refer(struct mxt_data *mxt)
+{
+	int ret = 0;
+	int try_cnt = 0;
+
+	do {
+		ret = read_all_refdata(mxt);
+		printk(KERN_DEBUG "[TSP] ret : %d\n", ret);
+		if (-EAGAIN != ret) {
+			printk(KERN_DEBUG "[TSP] status : %d\n", ret);
+			return ret;
+		}
+		printk(KERN_DEBUG "[TSP] failed to enter the debug mode : %d\n",
+				++try_cnt);
+	} while (try_cnt < 5);
+
+	return 1;
+}
+
+static void check_index(struct mxt_data *mxt)
+{
+	if (mxt->index > MXT1386_MAX_CHANNEL)
+		mxt->index = 0;
+}
+
+static void get_index(struct mxt_data *mxt, const char *str)
+{
+	u32 tmp;
+	sscanf(str, "%u", &tmp);
+	mxt->index = tmp;
+	printk(KERN_DEBUG "[TSP] mxt->index : %u\n", tmp);
+}
+
 static void set_mxt_update_exe(struct work_struct *work)
 {
 	struct	mxt_data *mxt;
@@ -1941,7 +2227,7 @@ static ssize_t set_mxt_firm_status_show(struct device *dev,
 
 }
 
-static ssize_t key_threshold_show(struct device *dev,
+static ssize_t show_threshold(struct device *dev,
 	struct device_attribute *attr,
 	char *buf)
 {
@@ -1954,7 +2240,7 @@ static ssize_t key_threshold_show(struct device *dev,
 		mxt->pdata->touchscreen_config.tchthr);
 }
 
-static ssize_t key_threshold_store(struct device *dev,
+static ssize_t store_threshold(struct device *dev,
 	struct device_attribute *attr,
 	const char *buf,
 	size_t size)
@@ -1979,454 +2265,6 @@ static ssize_t key_threshold_store(struct device *dev,
 		pr_info("[sec_touch] threshold write error\n");
 	}
 	return size;
-}
-
-static uint8_t read_uint16_t(u16 Address, u16 *Data, struct mxt_data *mxt)
-{
-	uint8_t status;
-	uint8_t temp[2];
-
-	status = mxt_read_block(mxt->client, Address, 2, temp);
-	*Data = ((uint16_t)temp[1]<<8) + (uint16_t)temp[0];
-
-	return status;
-}
-
-static int  read_all_data(struct mxt_data *mxt)
-{
-	int status = -1;
-	int try_cnt = 0;
-	u8 mode = 0;
-	u8 read_page = 0;
-	u8 max_page = 0;
-	u8 read_point = 0;
-	u8 max_line = 0;
-	u8 numofch = 0;
-	u8 dbg_data[128];
-	u16 max_val = 0;
-	u16 min_val = MIN_REF_VALUE;
-	u16	diagnostics;
-	u16 diagnostic_addr;
-	u16 ref_val;
-
-	diagnostic_addr = MXT_BASE_ADDR(MXT_DEBUG_DIAGNOSTICS_T37);
-	diagnostics = T6_REG(MXT_ADR_T6_DIAGNOSTICS);
-
-	/*Page Num Clear*/
-	mxt_write_byte(mxt->client, diagnostics, MXT_CMD_T6_CTE_MODE);
-	msleep(20);
-	mxt_write_byte(mxt->client, diagnostics, MXT_CMD_T6_REFERENCES_MODE);
-	msleep(20);
-
-	/* check the mode */
-	do {
-		mxt_read_byte(mxt->client, diagnostic_addr, &mode);
-		if (MXT_CMD_T6_REFERENCES_MODE == mode)
-			break;
-		try_cnt++;
-		msleep(20);
-	} while (try_cnt < 5);
-
-	max_page = MAX_CHANNEL / 64;
-	max_line = (mxt->pdata->touchscreen_config.xsize * 14) >> 6;
-
-	do {
-		if ((read_page%8) < max_line)
-			numofch = 64 * 2;
-		else if ((read_page%8) == max_line)
-			numofch = ((mxt->pdata->touchscreen_config.xsize * 14)
-				- (max_line * 64)) * 2;
-		else {
-			read_page++;
-			mxt_write_byte(mxt->client,
-				diagnostics, MXT_CMD_T6_PAGE_UP);
-			msleep(20);
-			continue;
-		}
-
-		mxt_read_byte(mxt->client, diagnostic_addr+1, &mode);
-		if (mode == read_page) {
-			mxt_read_block(mxt->client,
-				diagnostic_addr+2, numofch, dbg_data);
-			for (read_point = 0;
-			read_point < numofch; read_point += 2) {
-				ref_val = (u16)dbg_data[read_point] |
-					(u16)dbg_data[read_point+1] << 8;
-				if ((ref_val > MAX_REF_VALUE) ||
-					(ref_val < MIN_REF_VALUE)) {
-					status = 1;
-					goto eof;
-				}
-				if (ref_val > max_val)
-					max_val = ref_val;
-				else if (ref_val < min_val)
-					min_val = ref_val;
-			}
-
-			if (read_page == max_page) {
-				status = 0;
-				goto eof;
-			}
-
-			read_page++;
-			mxt_write_byte(mxt->client,
-				diagnostics,
-				MXT_CMD_T6_PAGE_UP);
-			msleep(20);
-
-		} else {
-			try_cnt++;
-			msleep(20);
-		}
-	} while (try_cnt < 10);
-eof:
-	pr_info("[TSP] diff %d\n", max_val - min_val);
-	pr_info("[TSP] diff %d\n", status);
-
-	return status;
-}
-
-static ssize_t all_refer_show(struct device *dev,
-					struct device_attribute *attr,
-					char *buf)
-{
-	struct mxt_data *mxt = dev_get_drvdata(dev);
-	int status = 0;
-	int try_cnt = 0;
-
-	do {
-		status = read_all_data(mxt);
-		if (-1 != status)
-			break;
-		try_cnt++;
-	} while (try_cnt < 5);
-
-	if (-1 == status)
-		status = 1;
-
-	return sprintf(buf, "%u\n", status);
-}
-
-static int  find_channel(struct mxt_data *mxt)
-{
-	int status = 0;
-	int try_cnt = 0;
-	u8 mode = 0;
-	u8 read_page = 0;
-	u8 max_page = 0;
-	u8 read_point = 0;
-	u8 max_line = 0;
-	u8 numofch = 0;
-	u8 dbg_data[128];
-	u16 max_val = 0;
-	u16	diagnostics;
-	u16 diagnostic_addr;
-	u16 delta_val;
-
-	diagnostic_addr = MXT_BASE_ADDR(MXT_DEBUG_DIAGNOSTICS_T37);
-	diagnostics = T6_REG(MXT_ADR_T6_DIAGNOSTICS);
-
-	/*Page Num Clear*/
-	mxt_write_byte(mxt->client, diagnostics, MXT_CMD_T6_CTE_MODE);
-	msleep(20);
-	mxt_write_byte(mxt->client, diagnostics, MXT_CMD_T6_DELTAS_MODE);
-	msleep(20);
-
-	/* check the mode */
-	do {
-		mxt_read_byte(mxt->client, diagnostic_addr, &mode);
-		if (MXT_CMD_T6_DELTAS_MODE == mode)
-			break;
-		try_cnt++;
-		msleep(20);
-	} while (try_cnt < 5);
-
-	max_page = MAX_CHANNEL / 64;
-	max_line = (mxt->pdata->touchscreen_config.xsize * 14) >> 6;
-
-	do {
-		if ((read_page%8) < max_line)
-			numofch = 64 * 2;
-		else if ((read_page%8) == max_line)
-			numofch = ((mxt->pdata->touchscreen_config.xsize * 14)
-				- (max_line * 64)) * 2;
-		else {
-			read_page++;
-			mxt_write_byte(mxt->client,
-				diagnostics, MXT_CMD_T6_PAGE_UP);
-			msleep(20);
-			continue;
-		}
-
-		mxt_read_byte(mxt->client, diagnostic_addr+1, &mode);
-		if (mode == read_page) {
-			mxt_read_block(mxt->client,
-				diagnostic_addr+2, numofch, dbg_data);
-			for (read_point = 0; read_point <
-				numofch; read_point += 2) {
-				delta_val = (u16)dbg_data[read_point] |
-					(u16)dbg_data[read_point+1] << 8;
-				if (delta_val > 32767)
-					delta_val = 65535 - delta_val;
-				if (delta_val > max_val) {
-					max_val = delta_val;
-					status = (read_point - 2)/2 +
-						(read_page * 64);
-				}
-			}
-
-			if (read_page == max_page)
-				break;
-
-			read_page++;
-			mxt_write_byte(mxt->client,
-				diagnostics, MXT_CMD_T6_PAGE_UP);
-			msleep(20);
-
-		} else {
-			try_cnt++;
-			msleep(20);
-		}
-	} while (try_cnt < 10);
-
-	return status;
-}
-
-static ssize_t find_channel_show(struct device *dev,
-					struct device_attribute *attr,
-					char *buf)
-{
-	int status = 0;
-	struct mxt_data *mxt = dev_get_drvdata(dev);
-
-	status = find_channel(mxt);
-
-	return sprintf(buf, "%u\n", status);
-}
-
-static int  read_dbg_data(u8 dbg_mode ,
-u16 node, u16 *dbg_data, struct mxt_data *mxt)
-{
-	int status = 0;
-	int try_cnt = 0;
-	u8 mode = 0;
-	u8 page = 0;
-	u8 read_page = 0;
-	u16 read_point;
-	u16	diagnostics;
-	u16 diagnostic_addr;
-
-	diagnostic_addr = MXT_BASE_ADDR(MXT_DEBUG_DIAGNOSTICS_T37);
-	diagnostics = T6_REG(MXT_ADR_T6_DIAGNOSTICS);
-
-	read_page = node / 64;
-	node %= 64;
-	read_point = (node * 2) + 2;
-
-	/*Page Num Clear*/
-	mxt_write_byte(mxt->client, diagnostics, MXT_CMD_T6_CTE_MODE);
-	msleep(20);
-	mxt_write_byte(mxt->client, diagnostics, dbg_mode);
-	msleep(20);
-
-	do {
-		mxt_read_byte(mxt->client, diagnostic_addr, &mode);
-		if (mode == dbg_mode)
-			break;
-		msleep(20);
-	} while (try_cnt < 5);
-
-	do {
-		if (page == read_page)
-			break;
-
-		mxt_read_byte(mxt->client, diagnostic_addr+1, &mode);
-
-		if (mode == page)
-			page++;
-		else {
-			/*pr_info("[TSP] try_cnt : %d\n", try_cnt);*/
-			try_cnt++;
-			msleep(20);
-			continue;
-		}
-
-		mxt_write_byte(mxt->client, diagnostics, MXT_CMD_T6_PAGE_UP);
-		msleep(20);
-
-	} while (try_cnt < 10);
-	status = read_uint16_t(diagnostic_addr + read_point, dbg_data, mxt);
-
-	return status;
-}
-
-static ssize_t set_refer0_mode_show(struct device *dev,
-					struct device_attribute *attr,
-					char *buf)
-{
-	int  status;
-	u16 qt_refrence = 0;
-	struct mxt_data *mxt = dev_get_drvdata(dev);
-
-	status = read_dbg_data(MXT_CMD_T6_REFERENCES_MODE,
-		test_node[0], &qt_refrence, mxt);
-	return sprintf(buf, "%u\n", qt_refrence);
-}
-
-static ssize_t set_refer1_mode_show(struct device *dev,
-					struct device_attribute *attr,
-					char *buf)
-{
-	int  status;
-	u16 qt_refrence = 0;
-	struct mxt_data *mxt = dev_get_drvdata(dev);
-
-	status = read_dbg_data(MXT_CMD_T6_REFERENCES_MODE,
-		test_node[1], &qt_refrence, mxt);
-	return sprintf(buf, "%u\n", qt_refrence);
-}
-
-static ssize_t set_refer2_mode_show(struct device *dev,
-					struct device_attribute *attr,
-					char *buf)
-{
-	int  status;
-	u16 qt_refrence = 0;
-	struct mxt_data *mxt = dev_get_drvdata(dev);
-
-	status = read_dbg_data(MXT_CMD_T6_REFERENCES_MODE,
-		test_node[2], &qt_refrence, mxt);
-	return sprintf(buf, "%u\n", qt_refrence);
-}
-
-
-static ssize_t set_refer3_mode_show(struct device *dev,
-					struct device_attribute *attr,
-					char *buf)
-{
-	int  status;
-	u16 qt_refrence = 0;
-	struct mxt_data *mxt = dev_get_drvdata(dev);
-
-	status = read_dbg_data(MXT_CMD_T6_REFERENCES_MODE,
-		test_node[3], &qt_refrence, mxt);
-	return sprintf(buf, "%u\n", qt_refrence);
-}
-
-
-static ssize_t set_refer4_mode_show(struct device *dev,
-					struct device_attribute *attr,
-					char *buf)
-{
-	int  status;
-	u16 qt_refrence = 0;
-	struct mxt_data *mxt = dev_get_drvdata(dev);
-
-	status = read_dbg_data(MXT_CMD_T6_REFERENCES_MODE,
-		test_node[4], &qt_refrence, mxt);
-	return sprintf(buf, "%u\n", qt_refrence);
-}
-
-static ssize_t set_delta0_mode_show(struct device *dev,
-					struct device_attribute *attr,
-					char *buf)
-{
-	int  status;
-	u16 qt_delta = 0;
-	struct mxt_data *mxt = dev_get_drvdata(dev);
-
-	status = read_dbg_data(MXT_CMD_T6_DELTAS_MODE,
-		test_node[0], &qt_delta, mxt);
-	if (qt_delta < 32767) {
-		return sprintf(buf, "%u\n", qt_delta);
-	} else {
-		qt_delta = 65535 - qt_delta;
-		return sprintf(buf, "-%u\n", qt_delta);
-	}
-}
-
-static ssize_t set_delta1_mode_show(struct device *dev,
-					struct device_attribute *attr,
-					char *buf)
-{
-	int  status;
-	u16 qt_delta = 0;
-	struct mxt_data *mxt = dev_get_drvdata(dev);
-
-	status = read_dbg_data(MXT_CMD_T6_DELTAS_MODE,
-		test_node[1], &qt_delta, mxt);
-	if (qt_delta < 32767) {
-		return sprintf(buf, "%u\n", qt_delta);
-	} else {
-		qt_delta = 65535 - qt_delta;
-		return sprintf(buf, "-%u\n", qt_delta);
-	}
-}
-
-static ssize_t set_delta2_mode_show(struct device *dev,
-					struct device_attribute *attr,
-					char *buf)
-{
-	int  status;
-	u16 qt_delta = 0;
-	struct mxt_data *mxt = dev_get_drvdata(dev);
-
-	status = read_dbg_data(MXT_CMD_T6_DELTAS_MODE,
-		test_node[2], &qt_delta, mxt);
-	if (qt_delta < 32767) {
-		return sprintf(buf, "%u\n", qt_delta);
-	} else {
-		qt_delta = 65535 - qt_delta;
-		return sprintf(buf, "-%u\n", qt_delta);
-	}
-}
-
-static ssize_t set_delta3_mode_show(struct device *dev,
-					struct device_attribute *attr,
-					char *buf)
-{
-	int  status;
-	u16 qt_delta = 0;
-	struct mxt_data *mxt = dev_get_drvdata(dev);
-
-	status = read_dbg_data(MXT_CMD_T6_DELTAS_MODE,
-		test_node[3], &qt_delta, mxt);
-	if (qt_delta < 32767) {
-		return sprintf(buf, "%u\n", qt_delta);
-	} else {
-		qt_delta = 65535 - qt_delta;
-		return sprintf(buf, "-%u\n", qt_delta);
-	}
-}
-
-static ssize_t set_delta4_mode_show(struct device *dev,
-					struct device_attribute *attr,
-					char *buf)
-{
-	int  status;
-	u16 qt_delta = 0;
-	struct mxt_data *mxt = dev_get_drvdata(dev);
-
-	status = read_dbg_data(MXT_CMD_T6_DELTAS_MODE,
-		test_node[4], &qt_delta, mxt);
-	if (qt_delta < 32767) {
-		return sprintf(buf, "%u\n", qt_delta);
-	} else {
-		qt_delta = 65535 - qt_delta;
-		return sprintf(buf, "-%u\n", qt_delta);
-	}
-}
-
-static ssize_t show_threshold(struct device *dev,
-			 struct device_attribute *attr,
-			 char *buf)
-{
-	struct mxt_data *mxt = dev_get_drvdata(dev);
-	u8 val;
-
-	mxt_read_byte(mxt->client, MXT_BASE_ADDR(MXT_TOUCH_MULTITOUCHSCREEN_T9)
-			+ MXT_ADR_T9_TCHTHR, &val);
-	return sprintf(buf, "%d\n", val);
 }
 
 static ssize_t set_suppression_show(struct device *dev,
@@ -2468,32 +2306,111 @@ static ssize_t set_suppression_store(struct device *dev,
 	return size;
 }
 
-/* noise test file */
+#define ATTR_SHOW_FN(name, fn, format, ...)	\
+static ssize_t show_##name(struct device *dev,	\
+				     struct device_attribute *attr,	\
+				     char *buf)		\
+{	\
+	struct mxt_data *mxt = dev_get_drvdata(dev);	\
+	fn;	\
+	return sprintf(buf, format "\n", ## __VA_ARGS__);	\
+}
+
+#define ATTR_STORE_FN(name, fn)		\
+static ssize_t store_##name(struct device *dev,	\
+				     struct device_attribute *attr,	\
+				     const char *buf, size_t size)	\
+{	\
+	struct mxt_data *mxt = dev_get_drvdata(dev);	\
+	fn(mxt, buf);	\
+	return size;	\
+}
+
+#define ATTR_SHOW_REF(num, node)	\
+ATTR_SHOW_FN(set_refer##num,	\
+	check_debug_data(mxt, node, MXT_CMD_T6_REFERENCES_MODE),	\
+	"%u", mxt->ref_data[node])
+
+#define ATTR_SHOW_DELTA(num, node)	\
+ATTR_SHOW_FN(set_delta##num,	\
+	check_debug_data(mxt, node, MXT_CMD_T6_DELTAS_MODE),	\
+	"%u", mxt->delta_data[node])
+
+static int check_family_id(struct mxt_data *mxt)
+{
+	return mxt->device_info.family_id;
+}
+
+/* sec_touchscreen */
+ATTR_SHOW_FN(mxt_touchtype, printk(KERN_DEBUG "[TSP] %s\n", __func__),
+	"ATMEL,MXT1386");
+
+static DEVICE_ATTR(mxt_touchtype, S_IRUGO, show_mxt_touchtype, NULL);
+
+/* tsp_noise_test */
+ATTR_SHOW_FN(set_module_off, mxt->pdata->suspend_platform_hw(), "tspoff");
+ATTR_SHOW_FN(set_module_on, mxt->pdata->resume_platform_hw(), "tspon");
+ATTR_SHOW_FN(x_line, printk(KERN_DEBUG "[TSP] %s\n", __func__),
+	"%d", mxt->pdata->touchscreen_config.xsize);
+ATTR_SHOW_FN(y_line, printk(KERN_DEBUG "[TSP] %s\n", __func__),
+	"%d", mxt->pdata->touchscreen_config.ysize);
+ATTR_SHOW_FN(set_all_refer, printk(KERN_DEBUG "[TSP] %s\n", __func__),
+	"%d", check_all_refer(mxt));
+ATTR_SHOW_FN(set_all_delta, read_all_deltadata(mxt), "set_all_delta");
+ATTR_SHOW_FN(disp_all_refdata, check_index(mxt),
+	"%u", mxt->ref_data[mxt->index]);
+ATTR_SHOW_FN(disp_all_deltadata, check_index(mxt),
+	"%u", mxt->delta_data[mxt->index]);
+ATTR_SHOW_FN(set_firm_version, printk(KERN_DEBUG "[TSP] %s\n", __func__),
+	"%d", check_family_id(mxt));
+
+ATTR_STORE_FN(disp_all_refdata, get_index);
+ATTR_STORE_FN(disp_all_deltadata, get_index);
+
+ATTR_SHOW_REF(0, 324);
+ATTR_SHOW_REF(1, 45);
+ATTR_SHOW_REF(2, 700);
+ATTR_SHOW_REF(3, 1355);
+ATTR_SHOW_REF(4, 1075);
+ATTR_SHOW_DELTA(0, 324);
+ATTR_SHOW_DELTA(1, 45);
+ATTR_SHOW_DELTA(2, 700);
+ATTR_SHOW_DELTA(3, 1355);
+ATTR_SHOW_DELTA(4, 1075);
+
+static DEVICE_ATTR(set_module_off, S_IRUGO, show_set_module_off, NULL);
+static DEVICE_ATTR(set_module_on, S_IRUGO, show_set_module_on, NULL);
+static DEVICE_ATTR(x_line, S_IRUGO, show_x_line, NULL);
+static DEVICE_ATTR(y_line, S_IRUGO, show_y_line, NULL);
+static DEVICE_ATTR(set_all_refer, S_IRUGO, show_set_all_refer, NULL);
+static DEVICE_ATTR(set_all_delta, S_IRUGO, show_set_all_delta, NULL);
+static DEVICE_ATTR(disp_all_refdata, S_IRUGO | S_IWUSR | S_IWGRP,
+	show_disp_all_refdata, store_disp_all_refdata);
+static DEVICE_ATTR(disp_all_deltadata, S_IRUGO | S_IWUSR | S_IWGRP,
+	show_disp_all_deltadata, store_disp_all_deltadata);
+static DEVICE_ATTR(set_refer0, S_IRUGO, show_set_refer0, NULL);
+static DEVICE_ATTR(set_delta0, S_IRUGO, show_set_delta0, NULL);
+static DEVICE_ATTR(set_refer1, S_IRUGO, show_set_refer1, NULL);
+static DEVICE_ATTR(set_delta1, S_IRUGO, show_set_delta1, NULL);
+static DEVICE_ATTR(set_refer2, S_IRUGO, show_set_refer2, NULL);
+static DEVICE_ATTR(set_delta2, S_IRUGO, show_set_delta2, NULL);
+static DEVICE_ATTR(set_refer3, S_IRUGO, show_set_refer3, NULL);
+static DEVICE_ATTR(set_delta3, S_IRUGO, show_set_delta3, NULL);
+static DEVICE_ATTR(set_refer4, S_IRUGO, show_set_refer4, NULL);
+static DEVICE_ATTR(set_delta4, S_IRUGO, show_set_delta4, NULL);
 static DEVICE_ATTR(tsp_firm_update, S_IRUGO, set_mxt_update_show, NULL);
 static DEVICE_ATTR(tsp_firm_update_status, S_IRUGO,
-set_mxt_firm_status_show, NULL);
+	set_mxt_firm_status_show, NULL);
 static DEVICE_ATTR(tsp_threshold, S_IRUGO | S_IWUSR,
-key_threshold_show, key_threshold_store);
+	show_threshold, store_threshold);
 static DEVICE_ATTR(tsp_firm_version_phone, S_IRUGO,
-set_mxt_firm_version_show, NULL);
-static DEVICE_ATTR(tsp_firm_version_panel,
-S_IRUGO, set_mxt_firm_version_read_show, NULL);
-static DEVICE_ATTR(set_all_refer, S_IRUGO, all_refer_show, NULL);
-static DEVICE_ATTR(set_refer0, S_IRUGO, set_refer0_mode_show, NULL);
-static DEVICE_ATTR(set_delta0, S_IRUGO, set_delta0_mode_show, NULL);
-static DEVICE_ATTR(set_refer1, S_IRUGO, set_refer1_mode_show, NULL);
-static DEVICE_ATTR(set_delta1, S_IRUGO, set_delta1_mode_show, NULL);
-static DEVICE_ATTR(set_refer2, S_IRUGO, set_refer2_mode_show, NULL);
-static DEVICE_ATTR(set_delta2, S_IRUGO, set_delta2_mode_show, NULL);
-static DEVICE_ATTR(set_refer3, S_IRUGO, set_refer3_mode_show, NULL);
-static DEVICE_ATTR(set_delta3, S_IRUGO, set_delta3_mode_show, NULL);
-static DEVICE_ATTR(set_refer4, S_IRUGO, set_refer4_mode_show, NULL);
-static DEVICE_ATTR(set_delta4, S_IRUGO, set_delta4_mode_show, NULL);
-static DEVICE_ATTR(set_threshould, S_IRUGO, show_threshold, NULL);
-static DEVICE_ATTR(delta_channel, S_IRUGO, find_channel_show, NULL);
+	set_mxt_firm_version_show, NULL);
+static DEVICE_ATTR(tsp_firm_version_panel, S_IRUGO,
+	set_mxt_firm_version_read_show, NULL);
 static DEVICE_ATTR(set_suppression,  S_IRUGO | S_IWUSR,
-		set_suppression_show, set_suppression_store);
-#endif
+	set_suppression_show, set_suppression_store);
+static DEVICE_ATTR(set_firm_version, S_IRUGO,
+	show_set_firm_version, NULL);
 
 static struct attribute *maxTouch_attributes[] = {
 	&dev_attr_deltas.attr,
@@ -2509,6 +2426,7 @@ static struct attribute *maxTouch_attributes[] = {
 	&dev_attr_fw_dev.attr,
 	&dev_attr_fw_bin.attr,
 	&dev_attr_object.attr,
+	&dev_attr_mxt_touchtype.attr,
 	NULL,
 };
 
@@ -2516,14 +2434,15 @@ static struct attribute_group maxtouch_attr_group = {
 	.attrs = maxTouch_attributes,
 };
 
-#ifdef ENABLE_NOISE_TEST_MODE
 static struct attribute *maxTouch_facotry_attributes[] = {
-	&dev_attr_tsp_firm_update.attr,
-	&dev_attr_tsp_firm_update_status.attr,
-	&dev_attr_tsp_threshold.attr,
-	&dev_attr_tsp_firm_version_phone.attr,
-	&dev_attr_tsp_firm_version_panel.attr,
+	&dev_attr_set_module_off.attr,
+	&dev_attr_set_module_on.attr,
+	&dev_attr_x_line.attr,
+	&dev_attr_y_line.attr,
 	&dev_attr_set_all_refer.attr,
+	&dev_attr_set_all_delta.attr,
+	&dev_attr_disp_all_refdata.attr,
+	&dev_attr_disp_all_deltadata.attr,
 	&dev_attr_set_refer0.attr,
 	&dev_attr_set_delta0.attr,
 	&dev_attr_set_refer1.attr,
@@ -2534,16 +2453,19 @@ static struct attribute *maxTouch_facotry_attributes[] = {
 	&dev_attr_set_delta3.attr,
 	&dev_attr_set_refer4.attr,
 	&dev_attr_set_delta4.attr,
-	&dev_attr_set_threshould.attr,
-	&dev_attr_delta_channel.attr,
+	&dev_attr_tsp_firm_update.attr,
+	&dev_attr_tsp_firm_update_status.attr,
+	&dev_attr_tsp_threshold.attr,
+	&dev_attr_tsp_firm_version_phone.attr,
+	&dev_attr_tsp_firm_version_panel.attr,
 	&dev_attr_set_suppression.attr,
+	&dev_attr_set_firm_version.attr,
 	NULL,
 };
 
 static struct attribute_group maxtouch_factory_attr_group = {
 	.attrs = maxTouch_facotry_attributes,
 };
-#endif
 
 /******************************************************************************/
 /* Initialization of driver                                                   */
@@ -3135,7 +3057,7 @@ static int __devinit mxt_probe(struct i2c_client *client,
 	register_early_suspend(&mxt->early_suspend);
 #endif	/* CONFIG_HAS_EARLYSUSPEND */
 
-	tsp_dev  = device_create(sec_class, NULL, 0, mxt, "sec_touch");
+	tsp_dev  = device_create(sec_class, NULL, 0, mxt, "sec_touchscreen");
 	if (IS_ERR(tsp_dev)) {
 		pr_err("Failed to create device for the sysfs\n");
 		error = -ENODEV;
@@ -3148,9 +3070,8 @@ static int __devinit mxt_probe(struct i2c_client *client,
 		goto err_sysfs_create_group;
 	}
 
-#ifdef ENABLE_NOISE_TEST_MODE
 	test_dev = device_create(sec_class, NULL, 0, mxt,
-	"qt602240_noise_test");
+	"tsp_noise_test");
 	if (IS_ERR(test_dev)) {
 		pr_err("Failed to create device for the factory test\n");
 		error = -ENODEV;
@@ -3163,7 +3084,6 @@ static int __devinit mxt_probe(struct i2c_client *client,
 		pr_err("Failed to create sysfs group for the factory test\n");
 		goto err_sysfs_create_group;
 	}
-#endif
 
 	wake_lock_init(&mxt->wakelock, WAKE_LOCK_SUSPEND, "touch");
 #ifdef MXT_CALIBRATE_WORKAROUND
