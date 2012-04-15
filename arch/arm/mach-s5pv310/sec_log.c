@@ -10,6 +10,7 @@
 #include <plat/map-base.h>
 #include <plat/map-s5p.h>
 #include <asm/mach/map.h>
+#include <compat/compat-2.6.h>
 
 /*
  * Example usage: sec_log=256K@0x45000000
