@@ -10,8 +10,8 @@
 
 OSKOS :=linux
 FILES_PREFIX=
-MALI_FILE_PREFIX := drivers/media/video/samsung/mali
-KBUILDROOT =
+MALI_FILE_PREFIX := $(KBUILD_SRC)/drivers/media/video/samsung/mali
+KBUILDROOT = $(KBUILD_OUTPUT)
 
 ifeq ($(CONFIG_MALI_DED_ONLY),y)
 USING_OS_MEMORY=0

@@ -49,7 +49,7 @@ endif
 endif
 
 EXTRA_CFLAGS += \
-		-include include/compat/compat-2.6.h \
+		-include $(KBUILD_SRC)/include/compat/compat-2.6.h \
         -DCOMPAT_BASE_TREE='"linux-stable.git"' \
         -DCOMPAT_BASE_TREE_VERSION='"v3.3"' \
         -DCOMPAT_PROJECT='"Compat-wireless"' \
