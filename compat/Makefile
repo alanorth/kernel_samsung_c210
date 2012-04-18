@@ -48,8 +48,14 @@ ifndef CONFIG_GENERIC_ATOMIC64
 endif
 endif
 
+ifeq ($(KBUILD_SRC),)
 EXTRA_CFLAGS += \
-		-include $(KBUILD_SRC)/include/compat/compat-2.6.h \
+		-include include/compat/compat-2.6.h
+else
+EXTRA_CFLAGS += \
+		-include $(KBUILD_SRC)/include/compat/compat-2.6.h
+endif
+EXTRA_CFLAGS += \
         -DCOMPAT_BASE_TREE='"linux-stable.git"' \
         -DCOMPAT_BASE_TREE_VERSION='"v3.3"' \
         -DCOMPAT_PROJECT='"Compat-wireless"' \
