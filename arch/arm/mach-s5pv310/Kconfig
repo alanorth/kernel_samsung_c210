@@ -483,32 +483,6 @@ menuconfig S5PV310_WATCHDOG_RESET
 
 endif
 
-config SEC_LOG
-    default n
-    bool "Enable support for sec_log" if EMBEDDED
-    depends on PRINTK
-    help
-      This option enables sec_log support. This provides combined
-      log buffer for both bootloader and kernel. It also preserves
-      previous content before reboot.
-
-config SEC_LOG_NONCACHED
-    default n
-    bool "Enable non cached kernel sec_log support" if EMBEDDED
-    depends on SEC_LOG
-    help
-      This option enables sec_non_cached_klog support.  It can
-      support non-cached kernel log in RAM dump and We don't need
-      to concern cache flush status for analyzing sudden lockup
-      issue.
-
-config SEC_LOG_LAST_KMSG
-    default n
-    bool "Enable /proc/last_kmsg support" if EMBEDDED
-    depends on SEC_LOG && !ANDROID_RAM_CONSOLE
-    help
-      This option enables /proc/last_kmsg support.
-
 menu "Support dynamic cpu hotplug (Experimental)"
 	depends on CPU_S5PV310 && HOTPLUG_CPU && SMP
 	config S5PV310_PM_HOTPLUG
